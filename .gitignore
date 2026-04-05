@@ -1,0 +1,83 @@
+/BUILD.info
+/tools/Docker/BUILD.info
+/tools/Docker/custom-ssl.crt
+/.idea/**
+/.vscode/
+**/.vscode/
+/rough_work/**
+/doc-build/**
+**/node_modules/
+/.venv/
+
+# Model weights (tests)
+/onnx/
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+*/stub
+
+.DS_Store
+.venv/**
+fastsurfer.egg-info
+uv.lock
+/doc/api/generated/
+app/gui/workbench/src-tauri/resources/
+
+# Test artifacts
+junit-results.xml
+.pytest_cache/
+*/out/
+/app/**/data/
+/test/data/
+/test/output/
+/checkpoints/
+
+# Desktop app build artifacts
+
+# Local/private environment files
+**/.env.worktrees/
+.worktrees/
+
+# C/C++ build artifacts
+# object files, libraries, executables
+*.o
+*.ko
+*.obj
+*.so
+*.dylib
+*.a
+*.lib
+*.dll
+*.exe
+*.out
+
+# precompiled headers
+*.gch
+
+# coverage and profiling
+*.gcno
+*.gcda
+
+# debug symbols and IDE files
+*.dSYM/
+*.pdb
+*.ilk
+.vs/
+
+# common CMake / build files and directories
+build/
+bin/
+lib/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+compile_commands.json
+
+# Qt/QtCreator
+*.pro.user
+moc_*
+qrc_*
+ui_*.h

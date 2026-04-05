@@ -1,0 +1,37 @@
+/BUILD.info
+/tools/Docker/BUILD.info
+/tools/Docker/custom-ssl.crt
+/.idea/**
+/.vscode/
+**/.vscode/
+/rough_work/**
+/doc-build/**
+**/node_modules/
+
+# Model weights (tests)
+/onnx/
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+*/stub
+
+.DS_Store
+.venv/**
+fastsurfer.egg-info
+uv.lock
+/doc/api/generated/
+
+# Test artifacts
+junit-results.xml
+.pytest_cache/
+*/out/
+/app/**/data/
+/test/data
+
+# Desktop app build artifacts
+
+# Local/private environment files
+**/.env.worktrees/
+.worktrees/
