@@ -1,46 +1,62 @@
 cmake_minimum_required(VERSION 3.21)
 
-project(FastSurferDesktop VERSION 0.1.0 LANGUAGES CXX)
+project(FastSurferQtDesktop LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_AUTOMOC ON)
-set(CMAKE_AUTOUIC ON)
-set(CMAKE_AUTORCC ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
 
-find_package(Qt6 REQUIRED COMPONENTS Widgets)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Qml Quick QuickControls2)
 
-qt_add_executable(fastsurfer_desktop
-    include/app/AppStatusBar.h
-    include/app/MainWindow.h
-    include/app/NavigationRail.h
-    include/app/PageId.h
-    include/app/Theme.h
-    include/app/TopBar.h
-    include/screens/AnalyticsPage.h
-    include/screens/DashboardPage.h
-    include/screens/PipelinesPage.h
-    include/screens/ScanViewerPage.h
-    include/widgets/AnalyticsChart.h
-    include/widgets/MetricCard.h
-    include/widgets/PipelineNode.h
-    include/widgets/ViewerPane.h
-    src/main.cpp
-    src/app/AppStatusBar.cpp
-    src/app/MainWindow.cpp
-    src/app/NavigationRail.cpp
-    src/app/Theme.cpp
-    src/app/TopBar.cpp
-    src/screens/AnalyticsPage.cpp
-    src/screens/DashboardPage.cpp
-    src/screens/PipelinesPage.cpp
-    src/screens/ScanViewerPage.cpp
-    src/widgets/AnalyticsChart.cpp
-    src/widgets/MetricCard.cpp
-    src/widgets/PipelineNode.cpp
-    src/widgets/ViewerPane.cpp
+qt_standard_project_setup()
+
+set_source_files_properties(
+    qml/qtquickdesktop/Theme.qml
+    PROPERTIES QT_QML_SINGLETON_TYPE TRUE
 )
 
-target_include_directories(fastsurfer_desktop PRIVATE include)
+qt_add_executable(fastsurfer_qt_desktop
+    src/main.cpp
+    src/app/application_controller.cpp
+    src/app/application_controller.h
+    src/app/navigation_state.cpp
+    src/app/navigation_state.h
+)
 
-target_link_libraries(fastsurfer_desktop PRIVATE Qt6::Widgets)
+target_include_directories(fastsurfer_qt_desktop PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+
+qt_add_qml_module(fastsurfer_qt_desktop
+    URI FastSurferDesktop
+    VERSION 1.0
+    QML_FILES
+        qml/qtquickdesktop/Main.qml
+        qml/qtquickdesktop/Theme.qml
+        qml/qtquickdesktop/components/AnalyticsBarChart.qml
+        qml/qtquickdesktop/components/AppShell.qml
+        qml/qtquickdesktop/components/MetricCard.qml
+        qml/qtquickdesktop/components/PillChip.qml
+        qml/qtquickdesktop/components/SectionHeader.qml
+        qml/qtquickdesktop/components/SideNav.qml
+        qml/qtquickdesktop/components/SurfacePanel.qml
+        qml/qtquickdesktop/components/TopBar.qml
+        qml/qtquickdesktop/components/ViewerPane.qml
+        qml/qtquickdesktop/pages/AnalyticsPage.qml
+        qml/qtquickdesktop/pages/DashboardPage.qml
+        qml/qtquickdesktop/pages/PipelinesPage.qml
+        qml/qtquickdesktop/pages/ScanViewerPage.qml
+)
+
+target_link_libraries(fastsurfer_qt_desktop PRIVATE
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Qml
+    Qt6::Quick
+    Qt6::QuickControls2
+)
+
+install(TARGETS fastsurfer_qt_desktop
+    BUNDLE DESTINATION .
+    RUNTIME DESTINATION .
+)
