@@ -3,6 +3,7 @@
 #include <QObject>
 #include <QString>
 #include <QVariantList>
+#include <QVariantMap>
 
 #include "app/navigation_state.h"
 
@@ -24,6 +25,10 @@ class ApplicationController : public QObject
     Q_PROPERTY(QVariantList analyticsBars READ analyticsBars CONSTANT)
     Q_PROPERTY(QVariantList analyticsCards READ analyticsCards CONSTANT)
     Q_PROPERTY(QVariantList analyticsInsights READ analyticsInsights CONSTANT)
+    Q_PROPERTY(QString conformStepInputPath READ conformStepInputPath WRITE setConformStepInputPath NOTIFY conformStepStateChanged)
+    Q_PROPERTY(QString conformStepCopyOrigPath READ conformStepCopyOrigPath WRITE setConformStepCopyOrigPath NOTIFY conformStepStateChanged)
+    Q_PROPERTY(QString conformStepConformedPath READ conformStepConformedPath WRITE setConformStepConformedPath NOTIFY conformStepStateChanged)
+    Q_PROPERTY(QVariantMap conformStepResult READ conformStepResult NOTIFY conformStepStateChanged)
 
 public:
     explicit ApplicationController(QObject *parent = nullptr);
@@ -44,6 +49,19 @@ public:
     QVariantList analyticsBars() const;
     QVariantList analyticsCards() const;
     QVariantList analyticsInsights() const;
+    QString conformStepInputPath() const;
+    void setConformStepInputPath(const QString &path);
+    QString conformStepCopyOrigPath() const;
+    void setConformStepCopyOrigPath(const QString &path);
+    QString conformStepConformedPath() const;
+    void setConformStepConformedPath(const QString &path);
+    QVariantMap conformStepResult() const;
+
+    Q_INVOKABLE void runConformStep();
+    Q_INVOKABLE void restoreConformStepDefaults();
+
+signals:
+    void conformStepStateChanged();
 
 private:
     NavigationState m_navigation;
@@ -57,4 +75,8 @@ private:
     QVariantList m_analyticsBars;
     QVariantList m_analyticsCards;
     QVariantList m_analyticsInsights;
+    QString m_conformStepInputPath;
+    QString m_conformStepCopyOrigPath;
+    QString m_conformStepConformedPath;
+    QVariantMap m_conformStepResult;
 };

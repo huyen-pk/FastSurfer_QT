@@ -1,0 +1,14 @@
+Collecting numpy
+  Using cached numpy-2.4.4-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl.metadata (6.6 kB)
+Collecting nibabel
+  Using cached nibabel-5.4.2-py3-none-any.whl.metadata (8.9 kB)
+Collecting packaging>=20 (from nibabel)
+  Using cached packaging-26.0-py3-none-any.whl.metadata (3.3 kB)
+Collecting typing-extensions>=4.6 (from nibabel)
+  Using cached typing_extensions-4.15.0-py3-none-any.whl.metadata (3.3 kB)
+Using cached numpy-2.4.4-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl (16.6 MB)
+Using cached nibabel-5.4.2-py3-none-any.whl (3.3 MB)
+Using cached packaging-26.0-py3-none-any.whl (74 kB)
+Using cached typing_extensions-4.15.0-py3-none-any.whl (44 kB)
+Installing collected packages: typing-extensions, packaging, numpy, nibabel
+Successfully installed nibabel-5.4.2 numpy-2.4.4 packaging-26.0 typing-extensions-4.15.0

@@ -43,93 +43,109 @@ Item {
             Column {
                 width: parent.width * 0.78
                 anchors.horizontalCenter: parent.horizontalCenter
-                spacing: 0
+                spacing: Theme.spacingXl
 
-                Repeater {
-                    model: controller.pipelineSteps
+                Column {
+                    width: parent.width
+                    spacing: 0
 
-                    delegate: Column {
-                        required property var modelData
+                    Repeater {
+                        model: controller.pipelineSteps
 
-                        width: parent.width
-                        spacing: 0
+                        delegate: Column {
+                            required property var modelData
 
-                        SurfacePanel {
                             width: parent.width
-                            implicitHeight: 136
-                            panelColor: modelData.active ? Theme.surfaceContainerHigh : Theme.surfaceContainer
+                            spacing: 0
 
-                            RowLayout {
-                                anchors.fill: parent
-                                anchors.margins: Theme.spacingLg
-                                spacing: Theme.spacingLg
+                            SurfacePanel {
+                                width: parent.width
+                                implicitHeight: 136
+                                panelColor: modelData.active ? Theme.surfaceContainerHigh : Theme.surfaceContainer
 
-                                Rectangle {
-                                    Layout.preferredWidth: 54
-                                    Layout.preferredHeight: 54
-                                    radius: Theme.radiusMd
-                                    color: Theme.accentSurface(modelData.accent)
+                                RowLayout {
+                                    anchors.fill: parent
+                                    anchors.margins: Theme.spacingLg
+                                    spacing: Theme.spacingLg
 
-                                    Text {
-                                        anchors.centerIn: parent
-                                        text: modelData.badge.substring(0, 2).toUpperCase()
-                                        color: Theme.accentColor(modelData.accent)
-                                        font.family: Theme.bodyFont
-                                        font.pixelSize: 12
-                                        font.weight: Font.Bold
-                                    }
-                                }
+                                    Rectangle {
+                                        Layout.preferredWidth: 54
+                                        Layout.preferredHeight: 54
+                                        radius: Theme.radiusMd
+                                        color: Theme.accentSurface(modelData.accent)
 
-                                ColumnLayout {
-                                    Layout.fillWidth: true
-                                    spacing: 4
-
-                                    Text {
-                                        text: modelData.title
-                                        color: Theme.textPrimary
-                                        font.family: Theme.displayFont
-                                        font.pixelSize: 24
-                                        font.weight: Font.Bold
+                                        Text {
+                                            anchors.centerIn: parent
+                                            text: modelData.badge.substring(0, 2).toUpperCase()
+                                            color: Theme.accentColor(modelData.accent)
+                                            font.family: Theme.bodyFont
+                                            font.pixelSize: 12
+                                            font.weight: Font.Bold
+                                        }
                                     }
 
-                                    Text {
-                                        text: modelData.subtitle
-                                        color: Theme.textSecondary
-                                        font.family: Theme.bodyFont
-                                        font.pixelSize: 14
-                                        wrapMode: Text.WordWrap
+                                    ColumnLayout {
                                         Layout.fillWidth: true
+                                        spacing: 4
+
+                                        Text {
+                                            text: modelData.title
+                                            color: Theme.textPrimary
+                                            font.family: Theme.displayFont
+                                            font.pixelSize: 24
+                                            font.weight: Font.Bold
+                                        }
+
+                                        Text {
+                                            text: modelData.subtitle
+                                            color: Theme.textSecondary
+                                            font.family: Theme.bodyFont
+                                            font.pixelSize: 14
+                                            wrapMode: Text.WordWrap
+                                            Layout.fillWidth: true
+                                        }
                                     }
-                                }
 
-                                ColumnLayout {
-                                    spacing: Theme.spacingSm
-                                    Layout.alignment: Qt.AlignTop
+                                    ColumnLayout {
+                                        spacing: Theme.spacingSm
+                                        Layout.alignment: Qt.AlignTop
 
-                                    PillChip {
-                                        text: modelData.badge
-                                        accent: modelData.accent
-                                    }
+                                        PillChip {
+                                            text: modelData.badge
+                                            accent: modelData.accent
+                                        }
 
-                                    Text {
-                                        text: modelData.state
-                                        color: Theme.accentColor(modelData.accent)
-                                        font.family: Theme.bodyFont
-                                        font.pixelSize: 13
-                                        font.weight: Font.DemiBold
+                                        Text {
+                                            text: modelData.state
+                                            color: Theme.accentColor(modelData.accent)
+                                            font.family: Theme.bodyFont
+                                            font.pixelSize: 13
+                                            font.weight: Font.DemiBold
+                                        }
                                     }
                                 }
                             }
-                        }
 
-                        Rectangle {
-                            visible: index < controller.pipelineSteps.length - 1
-                            width: 2
-                            height: 44
-                            x: 81
-                            color: Qt.rgba(Theme.cyan.r, Theme.cyan.g, Theme.cyan.b, 0.24)
+                            Rectangle {
+                                visible: index < controller.pipelineSteps.length - 1
+                                width: 2
+                                height: 44
+                                x: 81
+                                color: Qt.rgba(Theme.cyan.r, Theme.cyan.g, Theme.cyan.b, 0.24)
+                            }
                         }
                     }
+                }
+
+                SectionHeader {
+                    width: parent.width
+                    eyebrow: "Native step"
+                    title: "Desktop parity for pipeline_conform_and_save_orig"
+                    subtitle: "This card executes the approved _app/core MGZ step and exposes the same original-copy and conformed-output behavior targeted by the Python FastSurfer pipeline."
+                }
+
+                PipelineConformStepCard {
+                    width: parent.width
                 }
             }
         }

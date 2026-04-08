@@ -1,0 +1,689 @@
+#include "fastsurfer/core/conform_step_service.h"
+
+#include <algorithm>
+#include <array>
+#include <cctype>
+#include <cmath>
+#include <limits>
+#include <string>
+#include <utility>
+#include <vector>
+#include <stdexcept>
+
+#include <itkImage.h>
+#include <itkImportImageFilter.h>
+
+#include "fastsurfer/core/mgh_image.h"
+
+namespace fastsurfer::core {
+namespace {
+
+constexpr float kVoxelEpsilon = 1.0e-4F;
+constexpr double kRotationEpsilon = 1.0e-6;
+
+using Matrix3 = std::array<std::array<double, 3>, 3>;
+using Vector3 = std::array<double, 3>;
+using Vector4 = std::array<double, 4>;
+using FloatImage3D = itk::Image<float, 3>;
+
+struct OrientationTransform {
+    std::array<int, 3> axes {0, 1, 2};
+    std::array<int, 3> flips {1, 1, 1};
+};
+
+float roundToEpsilonPrecision(const float value)
+{
+    constexpr float scale = 10000.0F;
+    return std::round(value * scale) / scale;
+}
+
+int conformLikeCeil(const float value)
+{
+    constexpr double scale = 10000.0;
+    return static_cast<int>(std::ceil(std::floor(static_cast<double>(value) * scale) / scale));
+}
+
+std::string normalizeUpper(std::string value)
+{
+    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char character) {
+        return static_cast<char>(std::toupper(character));
+    });
+    return value;
+}
+
+int axisGroup(const char axisCode)
+{
+    switch (static_cast<char>(std::toupper(static_cast<unsigned char>(axisCode)))) {
+    case 'L':
+    case 'R':
+        return 0;
+    case 'P':
+    case 'A':
+        return 1;
+    case 'I':
+    case 'S':
+        return 2;
+    default:
+        throw std::runtime_error(std::string("Unsupported orientation axis code: '") + axisCode + "'.");
+    }
+}
+
+Vector3 axisVector(const char axisCode)
+{
+    switch (static_cast<char>(std::toupper(static_cast<unsigned char>(axisCode)))) {
+    case 'R':
+        return {1.0, 0.0, 0.0};
+    case 'L':
+        return {-1.0, 0.0, 0.0};
+    case 'A':
+        return {0.0, 1.0, 0.0};
+    case 'P':
+        return {0.0, -1.0, 0.0};
+    case 'S':
+        return {0.0, 0.0, 1.0};
+    case 'I':
+        return {0.0, 0.0, -1.0};
+    default:
+        throw std::runtime_error(std::string("Unsupported orientation axis code: '") + axisCode + "'.");
+    }
+}
+
+OrientationTransform computeOrientationTransform(const std::string &sourceOrientation, const std::string &targetOrientation)
+{
+    OrientationTransform transform;
+    for (int targetAxis = 0; targetAxis < 3; ++targetAxis) {
+        const int targetGroup = axisGroup(targetOrientation[targetAxis]);
+        bool found = false;
+        for (int sourceAxis = 0; sourceAxis < 3; ++sourceAxis) {
+            if (axisGroup(sourceOrientation[sourceAxis]) != targetGroup) {
+                continue;
+            }
+
+            transform.axes[targetAxis] = sourceAxis;
+            transform.flips[targetAxis] =
+                std::toupper(static_cast<unsigned char>(sourceOrientation[sourceAxis])) ==
+                        std::toupper(static_cast<unsigned char>(targetOrientation[targetAxis]))
+                    ? 1
+                    : -1;
+            found = true;
+            break;
+        }
+
+        if (!found) {
+            throw std::runtime_error(
+                "Could not derive orientation transform for MGZ conform step. Source='" +
+                sourceOrientation + "' target='" + targetOrientation + "'.");
+        }
+    }
+    return transform;
+}
+
+Matrix3 inverse3x3(const Matrix3 &matrix)
+{
+    const double determinant =
+        matrix[0][0] * (matrix[1][1] * matrix[2][2] - matrix[1][2] * matrix[2][1]) -
+        matrix[0][1] * (matrix[1][0] * matrix[2][2] - matrix[1][2] * matrix[2][0]) +
+        matrix[0][2] * (matrix[1][0] * matrix[2][1] - matrix[1][1] * matrix[2][0]);
+
+    if (std::fabs(determinant) <= std::numeric_limits<double>::epsilon()) {
+        throw std::runtime_error("Affine matrix is singular and cannot be inverted.");
+    }
+
+    const double invDet = 1.0 / determinant;
+    return Matrix3 {{
+        {{(matrix[1][1] * matrix[2][2] - matrix[1][2] * matrix[2][1]) * invDet,
+          (matrix[0][2] * matrix[2][1] - matrix[0][1] * matrix[2][2]) * invDet,
+          (matrix[0][1] * matrix[1][2] - matrix[0][2] * matrix[1][1]) * invDet}},
+        {{(matrix[1][2] * matrix[2][0] - matrix[1][0] * matrix[2][2]) * invDet,
+          (matrix[0][0] * matrix[2][2] - matrix[0][2] * matrix[2][0]) * invDet,
+          (matrix[0][2] * matrix[1][0] - matrix[0][0] * matrix[1][2]) * invDet}},
+        {{(matrix[1][0] * matrix[2][1] - matrix[1][1] * matrix[2][0]) * invDet,
+          (matrix[0][1] * matrix[2][0] - matrix[0][0] * matrix[2][1]) * invDet,
+          (matrix[0][0] * matrix[1][1] - matrix[0][1] * matrix[1][0]) * invDet}},
+    }};
+}
+
+Matrix4 multiply(const Matrix4 &left, const Matrix4 &right)
+{
+    Matrix4 result {{
+        {{0.0, 0.0, 0.0, 0.0}},
+        {{0.0, 0.0, 0.0, 0.0}},
+        {{0.0, 0.0, 0.0, 0.0}},
+        {{0.0, 0.0, 0.0, 0.0}},
+    }};
+
+    for (int row = 0; row < 4; ++row) {
+        for (int column = 0; column < 4; ++column) {
+            for (int k = 0; k < 4; ++k) {
+                result[row][column] += left[row][k] * right[k][column];
+            }
+        }
+    }
+    return result;
+}
+
+Vector4 multiply(const Matrix4 &matrix, const Vector4 &vector)
+{
+    Vector4 result {};
+    for (int row = 0; row < 4; ++row) {
+        result[row] = matrix[row][0] * vector[0] +
+                      matrix[row][1] * vector[1] +
+                      matrix[row][2] * vector[2] +
+                      matrix[row][3] * vector[3];
+    }
+    return result;
+}
+
+Matrix4 inverseAffine(const Matrix4 &matrix)
+{
+    const Matrix3 linear {{
+        {{matrix[0][0], matrix[0][1], matrix[0][2]}},
+        {{matrix[1][0], matrix[1][1], matrix[1][2]}},
+        {{matrix[2][0], matrix[2][1], matrix[2][2]}},
+    }};
+
+    const Matrix3 inverseLinear = inverse3x3(linear);
+    Matrix4 inverse {{
+        {{inverseLinear[0][0], inverseLinear[0][1], inverseLinear[0][2], 0.0}},
+        {{inverseLinear[1][0], inverseLinear[1][1], inverseLinear[1][2], 0.0}},
+        {{inverseLinear[2][0], inverseLinear[2][1], inverseLinear[2][2], 0.0}},
+        {{0.0, 0.0, 0.0, 1.0}},
+    }};
+
+    for (int row = 0; row < 3; ++row) {
+        inverse[row][3] = -(inverseLinear[row][0] * matrix[0][3] +
+                            inverseLinear[row][1] * matrix[1][3] +
+                            inverseLinear[row][2] * matrix[2][3]);
+    }
+    return inverse;
+}
+
+bool isClose(const double left, const double right, const double epsilon)
+{
+    return std::fabs(left - right) <= epsilon;
+}
+
+bool allCloseIdentity(const Matrix4 &matrix, const double epsilon)
+{
+    for (int row = 0; row < 4; ++row) {
+        for (int column = 0; column < 4; ++column) {
+            const double expected = row == column ? 1.0 : 0.0;
+            if (!isClose(matrix[row][column], expected, epsilon)) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+bool rotationRequiresInterpolation(const Matrix4 &vox2vox)
+{
+    for (int row = 0; row < 3; ++row) {
+        for (int column = 0; column < 3; ++column) {
+            const double absoluteValue = std::fabs(vox2vox[row][column]);
+            if (!isClose(absoluteValue, 1.0, kVoxelEpsilon) && !isClose(absoluteValue, 0.0, kRotationEpsilon)) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+Matrix4 affineFromHeader(const MghImage::Header &header)
+{
+    Matrix4 affine {{
+        {{0.0, 0.0, 0.0, 0.0}},
+        {{0.0, 0.0, 0.0, 0.0}},
+        {{0.0, 0.0, 0.0, 0.0}},
+        {{0.0, 0.0, 0.0, 1.0}},
+    }};
+
+    for (int column = 0; column < 3; ++column) {
+        for (int row = 0; row < 3; ++row) {
+            affine[row][column] = static_cast<double>(header.directionCosines[column * 3 + row]) *
+                                  static_cast<double>(header.spacing[column]);
+        }
+    }
+
+    for (int row = 0; row < 3; ++row) {
+        affine[row][3] = static_cast<double>(header.center[row]);
+        for (int column = 0; column < 3; ++column) {
+            affine[row][3] -= affine[row][column] * (static_cast<double>(header.dimensions[column]) / 2.0);
+        }
+    }
+
+    return affine;
+}
+
+std::array<float, 9> directionCosinesForOrientation(const std::string &orientation)
+{
+    std::array<float, 9> directionCosines {};
+    for (int axis = 0; axis < 3; ++axis) {
+        const Vector3 vector = axisVector(orientation[axis]);
+        for (int component = 0; component < 3; ++component) {
+            directionCosines[axis * 3 + component] = static_cast<float>(vector[component]);
+        }
+    }
+    return directionCosines;
+}
+
+std::array<int, 3> computeTargetImageSize(const MghImage &image, const float targetVoxelSize, const std::string &imageSizeMode)
+{
+    if (imageSizeMode == "auto") {
+        if (std::fabs(targetVoxelSize - 1.0F) <= std::fabs(1.0F - 0.95F)) {
+            return {256, 256, 256};
+        }
+
+        std::array<int, 3> target = image.header().dimensions;
+        int maxDimension = 256;
+        for (std::size_t index = 0; index < target.size(); ++index) {
+            const float fov = image.header().spacing[index] * static_cast<float>(image.header().dimensions[index]);
+            target[index] = conformLikeCeil(fov / targetVoxelSize);
+            maxDimension = std::max(maxDimension, target[index]);
+        }
+        return {maxDimension, maxDimension, maxDimension};
+    }
+
+    if (imageSizeMode == "fov") {
+        std::array<int, 3> target = image.header().dimensions;
+        for (std::size_t index = 0; index < target.size(); ++index) {
+            const float fov = image.header().spacing[index] * static_cast<float>(image.header().dimensions[index]);
+            target[index] = conformLikeCeil(fov / targetVoxelSize);
+        }
+        return target;
+    }
+
+    throw std::runtime_error("Unsupported image_size mode in native conform service: " + imageSizeMode);
+}
+
+float computeTargetVoxelSize(const MghImage &image, const ConformStepRequest &request)
+{
+    if (request.voxSizeMode == "min") {
+        float targetVoxelSize = std::min(roundToEpsilonPrecision(image.minVoxelSize()), 1.0F);
+        if (request.threshold1mm > 0.0F && targetVoxelSize > request.threshold1mm) {
+            targetVoxelSize = 1.0F;
+        }
+        return targetVoxelSize;
+    }
+
+    throw std::runtime_error("Unsupported vox_size mode in native conform service: " + request.voxSizeMode);
+}
+
+MghImage::Header buildTargetHeader(
+    const MghImage &image,
+    const float targetVoxelSize,
+    const std::array<int, 3> &nativeTargetDimensions,
+    const std::string &requestedOrientation)
+{
+    const std::string sourceOrientation = image.orientationCode();
+    const std::string orientation = requestedOrientation == "native" ? sourceOrientation : normalizeUpper(requestedOrientation);
+    const OrientationTransform transform = requestedOrientation == "native"
+        ? OrientationTransform {}
+        : computeOrientationTransform(sourceOrientation, orientation);
+
+    MghImage::Header header = image.header();
+    header.frames = 1;
+    header.type = static_cast<std::int32_t>(MghDataType::UChar);
+    header.rasGoodFlag = 1;
+    header.spacing = {targetVoxelSize, targetVoxelSize, targetVoxelSize};
+    for (int axis = 0; axis < 3; ++axis) {
+        header.dimensions[axis] = nativeTargetDimensions[transform.axes[axis]];
+    }
+    header.directionCosines = directionCosinesForOrientation(orientation);
+
+    const Matrix4 sourceAffine = image.affine();
+    const Vector4 sourceCenterInput {
+        static_cast<double>(image.header().dimensions[0]) / 2.0,
+        static_cast<double>(image.header().dimensions[1]) / 2.0,
+        static_cast<double>(image.header().dimensions[2]) / 2.0,
+        1.0,
+    };
+    const Vector4 sourceCenter = multiply(sourceAffine, sourceCenterInput);
+    header.center = {
+        static_cast<float>(sourceCenter[0]),
+        static_cast<float>(sourceCenter[1]),
+        static_cast<float>(sourceCenter[2]),
+    };
+
+    Matrix4 targetAffine = affineFromHeader(header);
+    const Matrix4 vox2vox = multiply(inverseAffine(targetAffine), sourceAffine);
+    if (!rotationRequiresInterpolation(vox2vox)) {
+        const Matrix4 invVox2Vox = inverseAffine(vox2vox);
+        const bool allHalfInteger =
+            isClose(invVox2Vox[0][3] * 2.0, std::round(invVox2Vox[0][3] * 2.0), 1.0e-4) &&
+            isClose(invVox2Vox[1][3] * 2.0, std::round(invVox2Vox[1][3] * 2.0), 1.0e-4) &&
+            isClose(invVox2Vox[2][3] * 2.0, std::round(invVox2Vox[2][3] * 2.0), 1.0e-4);
+        const bool allInteger =
+            isClose(invVox2Vox[0][3], std::round(invVox2Vox[0][3]), 1.0e-4) &&
+            isClose(invVox2Vox[1][3], std::round(invVox2Vox[1][3]), 1.0e-4) &&
+            isClose(invVox2Vox[2][3], std::round(invVox2Vox[2][3]), 1.0e-4);
+
+        if (!allInteger && allHalfInteger) {
+            const Vector4 adjustedCenterInput {
+                static_cast<double>(image.header().dimensions[0]) / 2.0 + (isClose(invVox2Vox[0][3], std::round(invVox2Vox[0][3]), 1.0e-4) ? 0.0 : 0.5),
+                static_cast<double>(image.header().dimensions[1]) / 2.0 + (isClose(invVox2Vox[1][3], std::round(invVox2Vox[1][3]), 1.0e-4) ? 0.0 : 0.5),
+                static_cast<double>(image.header().dimensions[2]) / 2.0 + (isClose(invVox2Vox[2][3], std::round(invVox2Vox[2][3]), 1.0e-4) ? 0.0 : 0.5),
+                1.0,
+            };
+            const Vector4 adjustedCenter = multiply(sourceAffine, adjustedCenterInput);
+            header.center = {
+                static_cast<float>(adjustedCenter[0]),
+                static_cast<float>(adjustedCenter[1]),
+                static_cast<float>(adjustedCenter[2]),
+            };
+        }
+    }
+
+    return header;
+}
+
+std::size_t flattenIndex(const std::array<int, 3> &dimensions, const int x, const int y, const int z)
+{
+    return (static_cast<std::size_t>(z) * static_cast<std::size_t>(dimensions[1]) + static_cast<std::size_t>(y)) *
+               static_cast<std::size_t>(dimensions[0]) +
+           static_cast<std::size_t>(x);
+}
+
+FloatImage3D::DirectionType itkDirectionFromHeader(const MghImage::Header &header)
+{
+    FloatImage3D::DirectionType direction;
+    direction.SetIdentity();
+    for (unsigned int column = 0; column < 3; ++column) {
+        for (unsigned int row = 0; row < 3; ++row) {
+            direction[row][column] = static_cast<double>(header.directionCosines[column * 3 + row]);
+        }
+    }
+    return direction;
+}
+
+FloatImage3D::PointType itkOriginFromAffine(const Matrix4 &affine)
+{
+    FloatImage3D::PointType origin;
+    for (unsigned int row = 0; row < 3; ++row) {
+        origin[row] = affine[row][3];
+    }
+    return origin;
+}
+
+FloatImage3D::SpacingType itkSpacingFromHeader(const MghImage::Header &header)
+{
+    FloatImage3D::SpacingType spacing;
+    for (unsigned int axis = 0; axis < 3; ++axis) {
+        spacing[axis] = static_cast<double>(header.spacing[axis]);
+    }
+    return spacing;
+}
+
+FloatImage3D::RegionType itkRegionFromDimensions(const std::array<int, 3> &dimensions)
+{
+    FloatImage3D::RegionType region;
+    FloatImage3D::IndexType start;
+    start.Fill(0);
+    FloatImage3D::SizeType size;
+    for (unsigned int axis = 0; axis < 3; ++axis) {
+        size[axis] = static_cast<FloatImage3D::SizeType::SizeValueType>(dimensions[axis]);
+    }
+    region.SetIndex(start);
+    region.SetSize(size);
+    return region;
+}
+
+FloatImage3D::Pointer importAsItkImage(const MghImage &image, std::vector<float> &sourceData)
+{
+    using ImportFilter = itk::ImportImageFilter<float, 3>;
+    auto importFilter = ImportFilter::New();
+    importFilter->SetRegion(itkRegionFromDimensions(image.header().dimensions));
+    importFilter->SetOrigin(itkOriginFromAffine(image.affine()));
+    importFilter->SetSpacing(itkSpacingFromHeader(image.header()));
+    importFilter->SetDirection(itkDirectionFromHeader(image.header()));
+    importFilter->SetImportPointer(sourceData.data(), sourceData.size(), false);
+    importFilter->Update();
+    return importFilter->GetOutput();
+}
+
+FloatImage3D::Pointer createGeometryImage(const MghImage::Header &header)
+{
+    auto geometryImage = FloatImage3D::New();
+    geometryImage->SetRegions(itkRegionFromDimensions(header.dimensions));
+    geometryImage->SetOrigin(itkOriginFromAffine(affineFromHeader(header)));
+    geometryImage->SetSpacing(itkSpacingFromHeader(header));
+    geometryImage->SetDirection(itkDirectionFromHeader(header));
+    return geometryImage;
+}
+
+float sampleLinearLikeScipy(
+    const std::vector<float> &sourceData,
+    const std::array<int, 3> &dimensions,
+    const itk::ContinuousIndex<double, 3> &continuousIndex)
+{
+    std::array<int, 3> lower {};
+    std::array<int, 3> upper {};
+    std::array<double, 3> weightUpper {};
+    std::array<double, 3> weightLower {};
+
+    for (int axis = 0; axis < 3; ++axis) {
+        const double maxIndex = static_cast<double>(dimensions[axis] - 1);
+        if (continuousIndex[axis] < 0.0 || continuousIndex[axis] > maxIndex) {
+            return 0.0F;
+        }
+
+        lower[axis] = static_cast<int>(std::floor(continuousIndex[axis]));
+        upper[axis] = lower[axis] + 1;
+        weightUpper[axis] = continuousIndex[axis] - static_cast<double>(lower[axis]);
+        weightLower[axis] = 1.0 - weightUpper[axis];
+
+        if (upper[axis] >= dimensions[axis]) {
+            upper[axis] = lower[axis];
+            weightUpper[axis] = 0.0;
+            weightLower[axis] = 1.0;
+        }
+    }
+
+    double value = 0.0;
+    for (int corner = 0; corner < 8; ++corner) {
+        const int x = (corner & 1) == 0 ? lower[0] : upper[0];
+        const int y = (corner & 2) == 0 ? lower[1] : upper[1];
+        const int z = (corner & 4) == 0 ? lower[2] : upper[2];
+
+        const double weightX = (corner & 1) == 0 ? weightLower[0] : weightUpper[0];
+        const double weightY = (corner & 2) == 0 ? weightLower[1] : weightUpper[1];
+        const double weightZ = (corner & 4) == 0 ? weightLower[2] : weightUpper[2];
+
+        value += static_cast<double>(sourceData[flattenIndex(dimensions, x, y, z)]) * weightX * weightY * weightZ;
+    }
+
+    return static_cast<float>(value);
+}
+
+std::vector<float> mapImageWithItk(
+    const MghImage &image,
+    std::vector<float> &sourceData,
+    const MghImage::Header &targetHeader)
+{
+    const auto inputImage = importAsItkImage(image, sourceData);
+    const auto outputGeometry = createGeometryImage(targetHeader);
+    const std::size_t voxelCount = static_cast<std::size_t>(targetHeader.dimensions[0]) *
+                                   static_cast<std::size_t>(targetHeader.dimensions[1]) *
+                                   static_cast<std::size_t>(targetHeader.dimensions[2]);
+    std::vector<float> mappedData(voxelCount, 0.0F);
+
+    for (int z = 0; z < targetHeader.dimensions[2]; ++z) {
+        for (int y = 0; y < targetHeader.dimensions[1]; ++y) {
+            for (int x = 0; x < targetHeader.dimensions[0]; ++x) {
+                FloatImage3D::IndexType outputIndex;
+                outputIndex[0] = x;
+                outputIndex[1] = y;
+                outputIndex[2] = z;
+
+                FloatImage3D::PointType physicalPoint;
+                outputGeometry->TransformIndexToPhysicalPoint(outputIndex, physicalPoint);
+
+                itk::ContinuousIndex<double, 3> inputContinuousIndex;
+                inputImage->TransformPhysicalPointToContinuousIndex(physicalPoint, inputContinuousIndex);
+
+                mappedData[flattenIndex(targetHeader.dimensions, x, y, z)] =
+                    sampleLinearLikeScipy(sourceData, image.header().dimensions, inputContinuousIndex);
+            }
+        }
+    }
+
+    return mappedData;
+}
+
+std::pair<float, float> getScale(const std::vector<float> &data, const float dstMin, const float dstMax)
+{
+    const auto [minIt, maxIt] = std::minmax_element(data.begin(), data.end());
+    const float dataMin = *minIt;
+    const float dataMax = *maxIt;
+
+    if (dataMin == dataMax) {
+        return {dataMin, 1.0F};
+    }
+
+    constexpr int bins = 1000;
+    const double binWidth = static_cast<double>(dataMax - dataMin) / static_cast<double>(bins);
+    if (binWidth <= std::numeric_limits<double>::epsilon()) {
+        return {dataMin, 1.0F};
+    }
+
+    std::vector<int> histogram(bins, 0);
+    std::size_t nonZeroVoxels = 0;
+    for (const float value : data) {
+        if (std::fabs(value) >= 1.0e-15F) {
+            ++nonZeroVoxels;
+        }
+
+        int index = static_cast<int>(std::floor((static_cast<double>(value) - dataMin) / binWidth));
+        index = std::clamp(index, 0, bins - 1);
+        ++histogram[index];
+    }
+
+    std::vector<int> cumulative(bins + 1, 0);
+    for (int index = 0; index < bins; ++index) {
+        cumulative[index + 1] = cumulative[index] + histogram[index];
+    }
+
+    std::vector<float> binEdges(bins + 1, dataMin);
+    for (int index = 0; index <= bins; ++index) {
+        binEdges[index] = static_cast<float>(static_cast<double>(dataMin) + binWidth * index);
+    }
+
+    const int totalVoxels = static_cast<int>(data.size());
+    const int lowerCutoff = 0;
+    int lowerEdgeIndex = 0;
+    for (int index = 0; index < static_cast<int>(cumulative.size()); ++index) {
+        if (cumulative[index] < lowerCutoff) {
+            lowerEdgeIndex = index + 1;
+        }
+    }
+
+    const int upperCutoff = totalVoxels - static_cast<int>((1.0 - 0.999) * static_cast<double>(nonZeroVoxels));
+    int upperEdgeIndex = bins - 1;
+    bool foundUpper = false;
+    for (int index = 0; index < static_cast<int>(cumulative.size()); ++index) {
+        if (cumulative[index] >= upperCutoff) {
+            upperEdgeIndex = std::max(0, index - 2);
+            foundUpper = true;
+            break;
+        }
+    }
+    if (!foundUpper) {
+        upperEdgeIndex = bins - 1;
+    }
+
+    const float srcMin = binEdges[lowerEdgeIndex];
+    const float srcMax = binEdges[upperEdgeIndex];
+    if (srcMin == srcMax) {
+        return {srcMin, 1.0F};
+    }
+
+    return {srcMin, (dstMax - dstMin) / (srcMax - srcMin)};
+}
+
+std::vector<float> scaleAndCrop(
+    const std::vector<float> &mappedData,
+    const float dstMin,
+    const float dstMax,
+    const float srcMin,
+    const float scale)
+{
+    std::vector<float> output(mappedData.size(), 0.0F);
+    for (std::size_t index = 0; index < mappedData.size(); ++index) {
+        const bool isZero = std::fabs(mappedData[index]) <= 1.0e-8F;
+        const float scaled = std::clamp(dstMin + scale * (mappedData[index] - srcMin), dstMin, dstMax);
+        output[index] = isZero ? 0.0F : scaled;
+    }
+    return output;
+}
+
+} // namespace
+
+bool ConformStepService::isAlreadyConformed(const MghImage &image, const ConformStepRequest &request)
+{
+    const float targetVoxelSize = computeTargetVoxelSize(image, request);
+    const auto targetDimensions = computeTargetImageSize(image, targetVoxelSize, request.imageSizeMode);
+
+    return image.hasSingleFrame() &&
+           image.isUint8() &&
+           image.hasIsotropicSpacing(targetVoxelSize, kVoxelEpsilon) &&
+           image.hasDimensions(targetDimensions) &&
+           image.matchesOrientation(request.orientation);
+}
+
+ConformStepResult ConformStepService::run(const ConformStepRequest &request) const
+{
+    if (request.inputPath.empty()) {
+        throw std::runtime_error("The conform step requires a non-empty input path.");
+    }
+    if (request.conformedPath.empty()) {
+        throw std::runtime_error("The conform step requires a non-empty conformed output path.");
+    }
+
+    const MghImage image = MghImage::load(request.inputPath);
+    if (!image.hasSingleFrame()) {
+        throw std::runtime_error("Native MGZ reconforming currently supports only single-frame inputs.");
+    }
+
+    ConformStepResult result;
+    result.inputPath = request.inputPath;
+    result.copyOrigPath = request.copyOrigPath;
+    result.conformedPath = request.conformedPath;
+    result.inputMetadata = image.metadata();
+
+    if (!request.copyOrigPath.empty()) {
+        image.save(request.copyOrigPath);
+    }
+
+    if (isAlreadyConformed(image, request)) {
+        image.save(request.conformedPath);
+        result.success = true;
+        result.alreadyConformed = true;
+        result.outputMetadata = image.metadata();
+        result.message = "Input image is already conformed. Original copy and conformed output were written successfully.";
+        return result;
+    }
+
+    const float targetVoxelSize = computeTargetVoxelSize(image, request);
+    const auto nativeTargetDimensions = computeTargetImageSize(image, targetVoxelSize, request.imageSizeMode);
+    const MghImage::Header targetHeader = buildTargetHeader(image, targetVoxelSize, nativeTargetDimensions, request.orientation);
+    std::vector<float> sourceData = image.voxelDataAsFloat();
+    std::vector<float> mappedData = mapImageWithItk(image, sourceData, targetHeader);
+
+    const auto [srcMin, scale] = getScale(sourceData, 0.0F, 255.0F);
+    mappedData = scaleAndCrop(mappedData, 0.0F, 255.0F, srcMin, scale);
+    for (float &value : mappedData) {
+        value = std::round(std::clamp(value, 0.0F, 255.0F));
+    }
+
+    const MghImage outputImage =
+        MghImage::fromVoxelData(targetHeader, mappedData, static_cast<std::int32_t>(MghDataType::UChar));
+    outputImage.save(request.conformedPath);
+
+    result.success = true;
+    result.alreadyConformed = false;
+    result.outputMetadata = outputImage.metadata();
+    result.message = "Input image was reconformed natively and the conformed MGZ output was written successfully.";
+    return result;
+}
+
+} // namespace fastsurfer::core

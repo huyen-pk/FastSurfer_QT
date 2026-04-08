@@ -1,0 +1,26 @@
+Test project /home/huyenpk/Projects/FastSurfer_QT/_app/core/build
+    Start 1: run_conform_step_should_write_copy_and_conformed_outputs
+1/3 Test #1: run_conform_step_should_write_copy_and_conformed_outputs ...................   Passed    0.76 sec
+    Start 2: run_conform_step_should_native_reconform_non_conformed_mgz
+2/3 Test #2: run_conform_step_should_native_reconform_non_conformed_mgz .................   Passed    0.88 sec
+    Start 3: run_conform_step_should_match_python_reference_on_subject140_mgz_fixture
+3/3 Test #3: run_conform_step_should_match_python_reference_on_subject140_mgz_fixture ...***Failed    1.08 sec
+Traceback (most recent call last):
+  File "/tmp/fastsurfer_core_python_subject140/run_python_reference.py", line 18, in <module>
+    orig = conform(orig, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/huyenpk/Projects/FastSurfer_QT/_app/core/tests/../../../FastSurferCNN/data_loader/conform.py", line 727, in conform
+    mapped_data = map_image(
+                  ^^^^^^^^^^
+  File "/home/huyenpk/Projects/FastSurfer_QT/_app/core/tests/../../../FastSurferCNN/data_loader/conform.py", line 458, in map_image
+    from scipy.ndimage import affine_transform
+ModuleNotFoundError: No module named 'scipy'
+The Python reference execution failed during the parity test. Set FASTSURFER_PYTHON_EXECUTABLE or create .venv-parity with numpy and nibabel.
+
+
+67% tests passed, 1 tests failed out of 3
+
+Total Test time (real) =   2.73 sec
+
+The following tests FAILED:
+	  3 - run_conform_step_should_match_python_reference_on_subject140_mgz_fixture (Failed)

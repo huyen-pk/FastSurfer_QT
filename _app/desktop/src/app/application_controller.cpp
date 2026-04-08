@@ -1,6 +1,13 @@
 #include "app/application_controller.h"
 
+#include <filesystem>
+#include <stdexcept>
+
+#include <QVariant>
 #include <QVariantMap>
+
+#include "fastsurfer/core/conform_step_request.h"
+#include "fastsurfer/core/conform_step_service.h"
 
 namespace {
 
@@ -32,12 +39,62 @@ QVariantMap labeledValue(
     };
 }
 
+QString repoRootPath()
+{
+    return QStringLiteral(FASTSURFER_REPO_ROOT);
+}
+
+QString defaultConformStepInputPath()
+{
+    return repoRootPath() + QStringLiteral("/test/data/Subject140/140_orig.mgz");
+}
+
+QString defaultConformStepCopyPath()
+{
+    return repoRootPath() + QStringLiteral("/_app/desktop/build/pipeline_conform_and_save_orig/140_orig_copy.mgz");
+}
+
+QString defaultConformStepConformedPath()
+{
+    return repoRootPath() + QStringLiteral("/_app/desktop/build/pipeline_conform_and_save_orig/140_orig_conf.mgz");
+}
+
+QVariantMap metadataToVariantMap(const fastsurfer::core::ImageMetadata &metadata)
+{
+    return QVariantMap {
+        {QStringLiteral("dimensions"), QStringLiteral("%1 x %2 x %3").arg(metadata.dimensions[0]).arg(metadata.dimensions[1]).arg(metadata.dimensions[2])},
+        {QStringLiteral("spacing"), QStringLiteral("%1 x %2 x %3 mm").arg(metadata.spacing[0], 0, 'f', 4).arg(metadata.spacing[1], 0, 'f', 4).arg(metadata.spacing[2], 0, 'f', 4)},
+        {QStringLiteral("orientation"), QString::fromStdString(metadata.orientationCode)},
+        {QStringLiteral("dataType"), QString::fromStdString(metadata.dataTypeName)},
+        {QStringLiteral("rasGood"), metadata.rasGood},
+        {QStringLiteral("frames"), metadata.frames},
+    };
+}
+
+QVariantMap idleConformStepResult()
+{
+    return QVariantMap {
+        {QStringLiteral("status"), QStringLiteral("idle")},
+        {QStringLiteral("statusLabel"), QStringLiteral("Idle")},
+        {QStringLiteral("success"), false},
+        {QStringLiteral("alreadyConformed"), false},
+        {QStringLiteral("message"), QStringLiteral("Run the native MGZ step to copy the original volume and write the conformed output." )},
+        {QStringLiteral("inputMetadata"), QVariantMap {}},
+        {QStringLiteral("outputMetadata"), QVariantMap {}},
+    };
+}
+
 } // namespace
 
 ApplicationController::ApplicationController(QObject *parent)
     : QObject(parent)
     , m_navigation(this)
 {
+    m_conformStepInputPath = defaultConformStepInputPath();
+    m_conformStepCopyOrigPath = defaultConformStepCopyPath();
+    m_conformStepConformedPath = defaultConformStepConformedPath();
+    m_conformStepResult = idleConformStepResult();
+
     m_dashboardMetrics = {
         metricCard(QStringLiteral("Monthly studies"), QStringLiteral("1,284"), QStringLiteral("12.5% above trailing month"), QStringLiteral("cyan"), QStringLiteral("MR")),
         metricCard(QStringLiteral("Processing confidence"), QStringLiteral("99.4%"), QStringLiteral("14 active compute nodes synchronized"), QStringLiteral("sky"), QStringLiteral("OK")),
@@ -297,4 +354,111 @@ QVariantList ApplicationController::analyticsCards() const
 QVariantList ApplicationController::analyticsInsights() const
 {
     return m_analyticsInsights;
+}
+
+QString ApplicationController::conformStepInputPath() const
+{
+    return m_conformStepInputPath;
+}
+
+void ApplicationController::setConformStepInputPath(const QString &path)
+{
+    if (m_conformStepInputPath == path) {
+        return;
+    }
+
+    m_conformStepInputPath = path;
+    emit conformStepStateChanged();
+}
+
+QString ApplicationController::conformStepCopyOrigPath() const
+{
+    return m_conformStepCopyOrigPath;
+}
+
+void ApplicationController::setConformStepCopyOrigPath(const QString &path)
+{
+    if (m_conformStepCopyOrigPath == path) {
+        return;
+    }
+
+    m_conformStepCopyOrigPath = path;
+    emit conformStepStateChanged();
+}
+
+QString ApplicationController::conformStepConformedPath() const
+{
+    return m_conformStepConformedPath;
+}
+
+void ApplicationController::setConformStepConformedPath(const QString &path)
+{
+    if (m_conformStepConformedPath == path) {
+        return;
+    }
+
+    m_conformStepConformedPath = path;
+    emit conformStepStateChanged();
+}
+
+QVariantMap ApplicationController::conformStepResult() const
+{
+    return m_conformStepResult;
+}
+
+void ApplicationController::runConformStep()
+{
+    m_conformStepResult = QVariantMap {
+        {QStringLiteral("status"), QStringLiteral("running")},
+        {QStringLiteral("statusLabel"), QStringLiteral("Running")},
+        {QStringLiteral("success"), false},
+        {QStringLiteral("alreadyConformed"), false},
+        {QStringLiteral("message"), QStringLiteral("Executing the native MGZ conform step...")},
+        {QStringLiteral("inputMetadata"), QVariantMap {}},
+        {QStringLiteral("outputMetadata"), QVariantMap {}},
+    };
+    emit conformStepStateChanged();
+
+    try {
+        fastsurfer::core::ConformStepRequest request;
+        request.inputPath = std::filesystem::path(m_conformStepInputPath.toStdString());
+        request.copyOrigPath = std::filesystem::path(m_conformStepCopyOrigPath.toStdString());
+        request.conformedPath = std::filesystem::path(m_conformStepConformedPath.toStdString());
+
+        fastsurfer::core::ConformStepService service;
+        const auto result = service.run(request);
+
+        m_conformStepResult = QVariantMap {
+            {QStringLiteral("status"), result.success ? QStringLiteral("success") : QStringLiteral("failed")},
+            {QStringLiteral("statusLabel"), result.success ? QStringLiteral("Completed") : QStringLiteral("Failed")},
+            {QStringLiteral("success"), result.success},
+            {QStringLiteral("alreadyConformed"), result.alreadyConformed},
+            {QStringLiteral("message"), QString::fromStdString(result.message)},
+            {QStringLiteral("inputMetadata"), metadataToVariantMap(result.inputMetadata)},
+            {QStringLiteral("outputMetadata"), metadataToVariantMap(result.outputMetadata)},
+            {QStringLiteral("copyOrigPath"), QString::fromStdString(result.copyOrigPath.string())},
+            {QStringLiteral("conformedPath"), QString::fromStdString(result.conformedPath.string())},
+        };
+    } catch (const std::exception &error) {
+        m_conformStepResult = QVariantMap {
+            {QStringLiteral("status"), QStringLiteral("failed")},
+            {QStringLiteral("statusLabel"), QStringLiteral("Failed")},
+            {QStringLiteral("success"), false},
+            {QStringLiteral("alreadyConformed"), false},
+            {QStringLiteral("message"), QString::fromUtf8(error.what())},
+            {QStringLiteral("inputMetadata"), QVariantMap {}},
+            {QStringLiteral("outputMetadata"), QVariantMap {}},
+        };
+    }
+
+    emit conformStepStateChanged();
+}
+
+void ApplicationController::restoreConformStepDefaults()
+{
+    m_conformStepInputPath = defaultConformStepInputPath();
+    m_conformStepCopyOrigPath = defaultConformStepCopyPath();
+    m_conformStepConformedPath = defaultConformStepConformedPath();
+    m_conformStepResult = idleConformStepResult();
+    emit conformStepStateChanged();
 }

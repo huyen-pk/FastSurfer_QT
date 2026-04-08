@@ -1,0 +1,9 @@
+[ 11%] Building CXX object CMakeFiles/fastsurfer_core.dir/src/conform_step_service.cpp.o
+[ 22%] Linking CXX static library libfastsurfer_core.a
+[ 33%] Built target fastsurfer_core
+[ 44%] Linking CXX executable test_conform_step_service
+[ 55%] Built target test_conform_step_service
+[ 66%] Linking CXX executable test_native_reconform_non_conformed
+[ 77%] Built target test_native_reconform_non_conformed
+[ 88%] Linking CXX executable test_python_parity_conform_step
+[100%] Built target test_python_parity_conform_step

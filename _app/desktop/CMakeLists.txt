@@ -10,6 +10,10 @@ find_package(Qt6 REQUIRED COMPONENTS Core Gui Qml Quick QuickControls2)
 
 qt_standard_project_setup()
 
+get_filename_component(FASTSURFER_REPO_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../.." ABSOLUTE)
+
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../core ${CMAKE_CURRENT_BINARY_DIR}/fastsurfer_core)
+
 set_source_files_properties(
     qml/qtquickdesktop/Theme.qml
     PROPERTIES QT_QML_SINGLETON_TYPE TRUE
@@ -27,6 +31,10 @@ target_include_directories(fastsurfer_qt_desktop PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 
+target_compile_definitions(fastsurfer_qt_desktop PRIVATE
+    FASTSURFER_REPO_ROOT="${FASTSURFER_REPO_ROOT}"
+)
+
 qt_add_qml_module(fastsurfer_qt_desktop
     URI FastSurferDesktop
     VERSION 1.0
@@ -37,6 +45,7 @@ qt_add_qml_module(fastsurfer_qt_desktop
         qml/qtquickdesktop/components/AppShell.qml
         qml/qtquickdesktop/components/MetricCard.qml
         qml/qtquickdesktop/components/PillChip.qml
+        qml/qtquickdesktop/components/PipelineConformStepCard.qml
         qml/qtquickdesktop/components/SectionHeader.qml
         qml/qtquickdesktop/components/SideNav.qml
         qml/qtquickdesktop/components/SurfacePanel.qml
@@ -54,6 +63,7 @@ target_link_libraries(fastsurfer_qt_desktop PRIVATE
     Qt6::Qml
     Qt6::Quick
     Qt6::QuickControls2
+    fastsurfer_core
 )
 
 install(TARGETS fastsurfer_qt_desktop
