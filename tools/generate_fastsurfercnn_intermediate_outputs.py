@@ -52,6 +52,11 @@ def parse_args() -> argparse.Namespace:
         help="Root directory for generated artifacts.",
     )
     parser.add_argument(
+        "--subject-id",
+        default=None,
+        help="Subject identifier used for the output directory name. Defaults to the input filename stem.",
+    )
+    parser.add_argument(
         "--device",
         default="auto",
         help="FastSurfer model device.",
@@ -224,6 +229,15 @@ def resolve_defaults() -> dict[str, Any]:
     }
 
 
+def resolve_subject_name(subject_id: str | None, input_path: Path) -> str:
+    subject_name = subject_id.strip() if subject_id is not None else input_path.stem
+    if not subject_name:
+        raise ValueError("subject_id must not be empty")
+    if Path(subject_name).name != subject_name or subject_name in {".", ".."}:
+        raise ValueError("subject_id must be a single directory name")
+    return subject_name
+
+
 def main() -> int:
     args = parse_args()
     setup_logging(args.log_file)
@@ -233,7 +247,7 @@ def main() -> int:
         raise FileNotFoundError(f"Input file not found: {input_path}")
 
     step_rows = load_step_rows(args.mapping_csv)
-    subject_name = input_path.stem
+    subject_name = resolve_subject_name(args.subject_id, input_path)
     subject_root = args.output_root / subject_name
     subject_root.mkdir(parents=True, exist_ok=True)
     step_dirs = create_step_directories(subject_root, step_rows)
