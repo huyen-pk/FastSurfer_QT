@@ -8,15 +8,26 @@
 /doc-build/**
 **/node_modules/
 /.venv/
+install-skills.sh
+skills-lock.json
+.agents/skills
 
 # Model weights (tests)
 /onnx/
+
+# Datasets
+/data/
+
+# Baseline methods
+/baseline/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
 *$py.class
 */stub
+/.ruff_cache/
+/.venv-parity/
 
 .DS_Store
 .venv/**
@@ -33,6 +44,8 @@ junit-results.xml
 /test/data/
 /test/output/
 /checkpoints/
+/generated/
+/.tmp/
 
 # Desktop app build artifacts
 

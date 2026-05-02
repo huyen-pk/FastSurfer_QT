@@ -2,7 +2,18 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BUILD_DIR="$SCRIPT_DIR/build"
+# repo root is two levels up from _app/core (fastsurfer repo root)
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+# Default build dir is out-of-source under repo root to avoid polluting source tree.
+# Can be overridden by passing a path as first argument or by setting the BUILD_DIR env var.
+if [ -n "${1:-}" ]; then
+	BUILD_DIR="$(cd "${1}" && pwd)"
+elif [ -n "${BUILD_DIR:-}" ]; then
+	BUILD_DIR="$(cd "${BUILD_DIR}" && pwd)"
+else
+	BUILD_DIR="$REPO_ROOT/build/core"
+fi
+
 NPROC="${NPROC:-$(nproc || echo 1)}"
 
 echo "Configuring FastSurfer core in: $BUILD_DIR"
