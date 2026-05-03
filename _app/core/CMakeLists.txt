@@ -10,6 +10,7 @@ find_package(ITK REQUIRED COMPONENTS
     ITKCommon
     ITKImageFunction
     ITKImageGrid
+    ITKIONIFTI
     ITKTransform
 )
 find_package(ZLIB REQUIRED)
@@ -19,6 +20,7 @@ include(${ITK_USE_FILE})
 add_library(fastsurfer_core STATIC
     src/conform_step_service.cpp
     src/mgh_image.cpp
+    src/nifti_converter.cpp
 )
 
 target_include_directories(fastsurfer_core

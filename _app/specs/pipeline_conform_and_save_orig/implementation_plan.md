@@ -33,7 +33,7 @@ The new feature must:
 - `_app/core` is currently empty.
 - `_app/desktop` is currently a static Qt Quick prototype with hardcoded `QVariantMap` data exposed by `ApplicationController`.
 - `_app/desktop` currently has no backend action layer and no native test harness.
-- The repository already contains a real MGZ fixture at `test/data/Subject140/140_orig.mgz`, which can be used for parity verification without introducing mocks.
+- The repository already contains a real MGZ fixture at `data/Subject140/140_orig.mgz`, which can be used for parity verification without introducing mocks.
 
 ## Scope For This Feature
 
@@ -55,7 +55,7 @@ Out of scope for this feature:
 
 ## Format Support Decision
 
-The first implementation should target **MGZ input and output parity** using the repository fixture `test/data/Subject140/140_orig.mgz`.
+The first implementation should target **MGZ input and output parity** using the repository fixture `data/Subject140/140_orig.mgz`.
 
 Reasoning:
 
@@ -160,7 +160,7 @@ They should use real files and the real Python implementation from this reposito
 
 ### Test Inputs
 
-- Input fixture: `test/data/Subject140/140_orig.mgz`
+- Input fixture: `data/Subject140/140_orig.mgz`
 - Temporary output directories created by the test runner
 
 ### Test Oracles
@@ -230,6 +230,6 @@ Implementation should proceed only if the following are approved:
 
 - `_app/core` becomes the native home for the conform-and-save-original processing step.
 - `_app/desktop` only provides the QML component, interaction flow, and result display.
-- The first implementation targets **real MGZ parity** using `test/data/Subject140/140_orig.mgz`.
+- The first implementation targets **real MGZ parity** using `data/Subject140/140_orig.mgz`.
 - Python remains the parity oracle in tests, not the runtime implementation.
 - The no-worktree exception is accepted for this task because it was explicitly requested by the user.

@@ -157,7 +157,7 @@ int main()
 {
     try {
         const std::filesystem::path repoRoot = FASTSURFER_REPO_ROOT;
-        const std::filesystem::path fixturePath = repoRoot / "test/data/Subject140/140_orig.mgz";
+        const std::filesystem::path fixturePath = repoRoot / "data/Subject140/140_orig.mgz";
         const auto pythonExecutable = resolvePythonExecutable(repoRoot);
 
         const auto nativeDir = makeFreshDirectory("fastsurfer_core_native_subject140");

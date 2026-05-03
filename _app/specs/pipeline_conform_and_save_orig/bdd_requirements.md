@@ -41,7 +41,7 @@ The implementation must be native C++ for the runtime path and must be verified 
 
 - The runtime implementation uses native C++ code and libraries for processing.
 - The parity tests do not use mocks or fake imaging services.
-- The first implementation focuses on MGZ parity using the repository fixture `test/data/Subject140/140_orig.mgz`.
+- The first implementation focuses on MGZ parity using the repository fixture `data/Subject140/140_orig.mgz`.
 
 ## Scenarios
 
@@ -101,7 +101,7 @@ The implementation must be native C++ for the runtime path and must be verified 
 
 ### Scenario 6: Native output matches the Python reference on the repository MGZ fixture
 
-**Given** the repository fixture `test/data/Subject140/140_orig.mgz`
+**Given** the repository fixture `data/Subject140/140_orig.mgz`
 
 **When** the native `_app/core` conform step runs on that fixture
 

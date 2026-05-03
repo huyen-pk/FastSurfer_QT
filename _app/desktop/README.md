@@ -77,6 +77,6 @@ ctest --test-dir build --output-on-failure
 The first native implementation in `_app/core` is intentionally narrow:
 
 - it targets MGZ inputs,
-- it is verified against `test/data/Subject140/140_orig.mgz`,
+- it is verified against `data/Subject140/140_orig.mgz`,
 - it supports the already-conformed MGZ path required for the approved parity fixture,
 - Python remains the parity oracle in tests only.

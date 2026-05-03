@@ -30,7 +30,7 @@ int main()
 {
     try {
         const std::filesystem::path repoRoot = FASTSURFER_REPO_ROOT;
-        const std::filesystem::path fixturePath = repoRoot / "test/data/Subject140/140_orig.mgz";
+        const std::filesystem::path fixturePath = repoRoot / "data/Subject140/140_orig.mgz";
         const std::filesystem::path outputDir = makeUniqueDirectory("fastsurfer_core_native_conform_step_test");
 
         const auto copyPath = outputDir / "copy_orig.mgz";

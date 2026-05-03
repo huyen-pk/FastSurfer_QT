@@ -46,7 +46,7 @@ QString repoRootPath()
 
 QString defaultConformStepInputPath()
 {
-    return repoRootPath() + QStringLiteral("/test/data/Subject140/140_orig.mgz");
+    return repoRootPath() + QStringLiteral("/data/Subject140/140_orig.mgz");
 }
 
 QString defaultConformStepCopyPath()

@@ -14,6 +14,7 @@
 #include <itkImportImageFilter.h>
 
 #include "fastsurfer/core/mgh_image.h"
+#include "fastsurfer/core/nifti_converter.h"
 
 namespace fastsurfer::core {
 namespace {
@@ -639,7 +640,9 @@ ConformStepResult ConformStepService::run(const ConformStepRequest &request) con
         throw std::runtime_error("The conform step requires a non-empty conformed output path.");
     }
 
-    const MghImage image = MghImage::load(request.inputPath);
+    const MghImage image = NiftiConverter::isSupportedPath(request.inputPath)
+        ? NiftiConverter::loadAsMgh(request.inputPath)
+        : MghImage::load(request.inputPath);
     if (!image.hasSingleFrame()) {
         throw std::runtime_error("Native MGZ reconforming currently supports only single-frame inputs.");
     }

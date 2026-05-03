@@ -39,7 +39,7 @@ Result:
 
 - the native MGZ test executable completed without error,
 - the Python parity executable completed without error,
-- the native and Python outputs matched for the approved fixture `test/data/Subject140/140_orig.mgz`.
+- the native and Python outputs matched for the approved fixture `data/Subject140/140_orig.mgz`.
 
 ### 4. Desktop Configure And Build
 
