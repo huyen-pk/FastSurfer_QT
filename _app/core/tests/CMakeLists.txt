@@ -87,6 +87,7 @@ add_executable(test_conform_step_service_nifti
 target_link_libraries(test_conform_step_service_nifti
     PRIVATE
         fastsurfer_core
+    Eigen3::Eigen
 )
 
 target_compile_definitions(test_conform_step_service_nifti

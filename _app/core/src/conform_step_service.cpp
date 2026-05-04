@@ -330,7 +330,9 @@ MghImage::Header buildTargetHeader(
     for (int axis = 0; axis < 3; ++axis) {
         header.dimensions[axis] = nativeTargetDimensions[transform.axes[axis]];
     }
-    header.directionCosines = directionCosinesForOrientation(orientation);
+    header.directionCosines = requestedOrientation == "native"
+        ? image.header().directionCosines
+        : directionCosinesForOrientation(orientation);
 
     const Matrix4 sourceAffine = image.affine();
     const Vector4 sourceCenterInput {

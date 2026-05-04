@@ -1,4 +1,0 @@
-[ 60%] Built target fastsurfer_core
-[ 80%] Building CXX object tests/CMakeFiles/test_python_parity_conform_step.dir/test_python_parity_conform_step.cpp.o
-[100%] Linking CXX executable test_python_parity_conform_step
-[100%] Built target test_python_parity_conform_step

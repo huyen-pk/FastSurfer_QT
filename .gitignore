@@ -81,6 +81,7 @@ junit-results.xml
 
 # common CMake / build files and directories
 build/
+**/build_logs/
 bin/
 lib/
 CMakeFiles/
@@ -88,6 +89,7 @@ CMakeCache.txt
 cmake_install.cmake
 Makefile
 compile_commands.json
+*/compile_commands.json
 
 # Qt/QtCreator
 *.pro.user
