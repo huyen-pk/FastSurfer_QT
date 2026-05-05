@@ -43,11 +43,14 @@ Use a mixture of healthy, multi-vendor, high-resolution, and pathological datase
   - https://osf.io/nhtur/
 - **Medical Segmentation Decathlon (MSD) — Task 01 Brain Tumour (use for robustness/OOD)**
   - http://medicaldecathlon.com/ (Task 01: Brain Tumour)
+- **Philip MRI test data (oblique phantom scans for affine and geometry validation)**
+  - https://github.com/grlee77/parrec_oblique
+  - https://github.com/nipy/nibabel/tree/main/nibabel/tests/data
 
 Notes:
 - For CI, prefer IXI or a small OASIS subset to avoid heavy downloads. Keep HCP and ADNI for more thorough nightly/scheduled validation.
 - The concrete benchmark implementation defined below currently assumes a **MindBoggle-based cohort** with multiple subjects, scan-rescan pairs, and generated FastSurfer artifacts; the broader dataset list remains optional for future extensions.
-(In bold are downloadable for non research institution)
+ (In bold are downloadable for non research institution)
 
 ## Using MSD Brain Tumour Data (Guidance)
 - Purpose: robustness and OOD testing only. Do not use to claim improved anatomical segmentation accuracy.
@@ -291,6 +294,7 @@ Use datasets for distinct purposes rather than forcing one cohort to answer ever
 | --- | --- | --- | --- | --- |
 | **MindBoggle101 benchmark subset** | primary ROI agreement benchmark and anatomical benchmark | `>= 10` benchmark subjects| input `mri/orig.mgz`; optional manual truth `mri/labels.DKT31.manual+aseg.nii.gz`; FreeSurfer-style outputs such as `mri/aparc+aseg.mgz` | current primary benchmark cohort |
 | **MindBoggle101 repeated-scan subset** | current repeated-scan reliability benchmark | all available scan-rescan pairs | T1w inputs plus `subject_id` and `session_id` linking scan and rescan | current source for repeated-scan ROI reliability |
+| **PhilipPhilips MRI test data** | geometry validation & math correctness | triply oblique scans | Triply oblique scans with angles offset from each of these image planes | [specs](./_app/specs/geometric_transformation_test_validation/oblique_geometry_test_plan.md) |
 | **Future labeled cohort** | ROI group-separability benchmark | `>= 25` per group after QC | T1w inputs plus metadata table with `group`, `age`, `sex`, `site`, and `eTIV` | not part of the current implementation scope |
 
 Practical scope rule:
@@ -298,6 +302,7 @@ Practical scope rule:
 - Use **MindBoggle101** as the concrete benchmark cohort already represented in this repository.
 - Use **Colin27-1** as the benchmark harness smoke test and schema reference.
 - Use the **MindBoggle scan-rescan subset** for current repeated-scan reliability.
+- Use **PhilipPhilips MRI test data** for conversion and geometry validation. The fixtures exercise vendor header quirks, oblique affine/orientation handling, and interpolation behavior for non-axial acquisitions.
 - Treat **group-separability cohorts** as a future extension.
 
 ### B. Exact Derived Outputs To Compute
