@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <iostream>
 #include <limits>
+#include <random>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -601,28 +602,106 @@ std::size_t flattenIndex(const std::array<int, 3> &dimensions, const std::array<
            static_cast<std::size_t>(index[0]);
 }
 
+int clampProbeIndex(const int dimension, const int index)
+{
+    return std::clamp(index, 0, std::max(0, dimension - 1));
+}
+
 std::vector<int> axisProbeSamples(const int dimension)
 {
+    if (dimension <= 0) {
+        return {};
+    }
+
     std::vector<int> samples {
-        1,
-        std::max(1, dimension / 4),
-        std::max(1, dimension / 2),
-        std::max(1, (3 * dimension) / 4),
-        std::max(1, dimension - 2),
+        0,
+        clampProbeIndex(dimension, 1),
+        clampProbeIndex(dimension, dimension / 4),
+        clampProbeIndex(dimension, dimension / 2),
+        clampProbeIndex(dimension, (3 * dimension) / 4),
+        clampProbeIndex(dimension, dimension - 2),
+        clampProbeIndex(dimension, dimension - 1),
     };
     std::sort(samples.begin(), samples.end());
     samples.erase(std::unique(samples.begin(), samples.end()), samples.end());
     return samples;
 }
 
-std::vector<std::array<int, 3>> generateProbeIndices(const std::array<int, 3> &dimensions)
+std::vector<int> stratifiedAxisProbeSamples(const int dimension, const int binCount = 6)
 {
-    const auto xs = axisProbeSamples(dimensions[0]);
-    const auto ys = axisProbeSamples(dimensions[1]);
-    const auto zs = axisProbeSamples(dimensions[2]);
+    if (dimension <= 0) {
+        return {};
+    }
 
+    const int effectiveBinCount = std::min(std::max(2, binCount), dimension);
+    std::vector<int> samples;
+    samples.reserve(static_cast<std::size_t>(effectiveBinCount));
+    for (int bin = 0; bin < effectiveBinCount; ++bin) {
+        const double center = ((static_cast<double>(bin) + 0.5) * static_cast<double>(dimension)) /
+                              static_cast<double>(effectiveBinCount);
+        samples.push_back(clampProbeIndex(dimension, static_cast<int>(std::floor(center))));
+    }
+
+    std::sort(samples.begin(), samples.end());
+    samples.erase(std::unique(samples.begin(), samples.end()), samples.end());
+    return samples;
+}
+
+std::array<int, 2> jitteredBinBounds(const int dimension, const int bin, const int binCount)
+{
+    const int start = (bin * dimension) / binCount;
+    const int nextStart = ((bin + 1) * dimension) / binCount;
+    const int end = std::max(start, nextStart - 1);
+    return {start, end};
+}
+
+std::vector<std::array<int, 3>> generateJitteredProbeIndices(
+    const std::array<int, 3> &dimensions,
+    const int binCount = 3)
+{
+    if (dimensions[0] <= 0 || dimensions[1] <= 0 || dimensions[2] <= 0) {
+        return {};
+    }
+
+    const int effectiveBinsX = std::min(std::max(1, binCount), dimensions[0]);
+    const int effectiveBinsY = std::min(std::max(1, binCount), dimensions[1]);
+    const int effectiveBinsZ = std::min(std::max(1, binCount), dimensions[2]);
+
+    std::mt19937 randomEngine(1337U);
     std::vector<std::array<int, 3>> probes;
-    probes.reserve(xs.size() * ys.size() * zs.size());
+    probes.reserve(static_cast<std::size_t>(effectiveBinsX * effectiveBinsY * effectiveBinsZ));
+
+    for (int binX = 0; binX < effectiveBinsX; ++binX) {
+        const auto [startX, endX] = jitteredBinBounds(dimensions[0], binX, effectiveBinsX);
+        std::uniform_int_distribution<int> distributionX(startX, endX);
+
+        for (int binY = 0; binY < effectiveBinsY; ++binY) {
+            const auto [startY, endY] = jitteredBinBounds(dimensions[1], binY, effectiveBinsY);
+            std::uniform_int_distribution<int> distributionY(startY, endY);
+
+            for (int binZ = 0; binZ < effectiveBinsZ; ++binZ) {
+                const auto [startZ, endZ] = jitteredBinBounds(dimensions[2], binZ, effectiveBinsZ);
+                std::uniform_int_distribution<int> distributionZ(startZ, endZ);
+                probes.push_back({
+                    distributionX(randomEngine),
+                    distributionY(randomEngine),
+                    distributionZ(randomEngine),
+                });
+            }
+        }
+    }
+
+    std::sort(probes.begin(), probes.end());
+    probes.erase(std::unique(probes.begin(), probes.end()), probes.end());
+    return probes;
+}
+
+void appendCartesianProbes(
+    const std::vector<int> &xs,
+    const std::vector<int> &ys,
+    const std::vector<int> &zs,
+    std::vector<std::array<int, 3>> &probes)
+{
     for (const int x : xs) {
         for (const int y : ys) {
             for (const int z : zs) {
@@ -630,6 +709,30 @@ std::vector<std::array<int, 3>> generateProbeIndices(const std::array<int, 3> &d
             }
         }
     }
+}
+
+std::vector<std::array<int, 3>> generateProbeIndices(const std::array<int, 3> &dimensions)
+{
+    const auto boundaryXs = axisProbeSamples(dimensions[0]);
+    const auto boundaryYs = axisProbeSamples(dimensions[1]);
+    const auto boundaryZs = axisProbeSamples(dimensions[2]);
+    const auto stratifiedXs = stratifiedAxisProbeSamples(dimensions[0]);
+    const auto stratifiedYs = stratifiedAxisProbeSamples(dimensions[1]);
+    const auto stratifiedZs = stratifiedAxisProbeSamples(dimensions[2]);
+    const auto jitteredProbes = generateJitteredProbeIndices(dimensions);
+
+    std::vector<std::array<int, 3>> probes;
+    probes.reserve(
+        boundaryXs.size() * boundaryYs.size() * boundaryZs.size() +
+        stratifiedXs.size() * stratifiedYs.size() * stratifiedZs.size() +
+        jitteredProbes.size());
+
+    appendCartesianProbes(boundaryXs, boundaryYs, boundaryZs, probes);
+    appendCartesianProbes(stratifiedXs, stratifiedYs, stratifiedZs, probes);
+    probes.insert(probes.end(), jitteredProbes.begin(), jitteredProbes.end());
+
+    std::sort(probes.begin(), probes.end());
+    probes.erase(std::unique(probes.begin(), probes.end()), probes.end());
     return probes;
 }
 
@@ -663,19 +766,20 @@ ProbeStats evaluateProbes(
         itkIndex[1] = probe[1];
         itkIndex[2] = probe[2];
 
-        FloatImage3D::PointType physicalPoint;
-        outputGeometry->TransformIndexToPhysicalPoint(itkIndex, physicalPoint);
+        FloatImage3D::PointType actualPoint;
+        outputGeometry->TransformIndexToPhysicalPoint(itkIndex, actualPoint);
 
         FloatImage3D::PointType expectedPoint;
         expectedGeometry->TransformIndexToPhysicalPoint(itkIndex, expectedPoint);
         const double physicalError = std::sqrt(
-            std::pow(physicalPoint[0] - expectedPoint[0], 2.0) +
-            std::pow(physicalPoint[1] - expectedPoint[1], 2.0) +
-            std::pow(physicalPoint[2] - expectedPoint[2], 2.0));
+            std::pow(actualPoint[0] - expectedPoint[0], 2.0) +
+            std::pow(actualPoint[1] - expectedPoint[1], 2.0) +
+            std::pow(actualPoint[2] - expectedPoint[2], 2.0));
         stats.maxPhysicalError = std::max(stats.maxPhysicalError, physicalError);
 
         itk::ContinuousIndex<double, 3> sourceContinuousIndex;
-        const bool mapped = sourceOracle.image->TransformPhysicalPointToContinuousIndex(physicalPoint, sourceContinuousIndex);
+        const bool mapped =
+            sourceOracle.image->TransformPhysicalPointToContinuousIndex(expectedPoint, sourceContinuousIndex);
 
         float sampledValue = 0.0F;
         if (mapped && sourceOracle.interpolator->IsInsideBuffer(sourceContinuousIndex)) {
