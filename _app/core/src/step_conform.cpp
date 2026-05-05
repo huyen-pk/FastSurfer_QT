@@ -807,7 +807,8 @@ ConformStepResult ConformStepService::run(const ConformStepRequest &request) con
         image.save(request.copyOrigPath);
     }
 
-    if (isAlreadyConformed(image, request)) {
+    const bool alreadyConformed = isAlreadyConformed(image, request);
+    if (alreadyConformed && !request.forceConform) {
         image.save(request.conformedPath);
         result.success = true;
         result.alreadyConformed = true;
@@ -827,8 +828,17 @@ ConformStepResult ConformStepService::run(const ConformStepRequest &request) con
             ? mapImageWithoutInterpolation(sourceData, image.header().dimensions, targetHeader.dimensions, targetToSource)
             : mapImageWithItk(image, sourceData, targetHeader);
 
-    const auto [srcMin, scale] = getScale(sourceData, 0.0F, 255.0F);
-    mappedData = scaleAndCrop(mappedData, 0.0F, 255.0F, srcMin, scale);
+    if (alreadyConformed && request.forceConform && image.isUint8()) {
+        // Skip the histogram scaling to measure resampling errors
+        // when running conform on an already conformed image (round trip test).
+        for (float &value : mappedData) {
+            value = std::clamp(value, 0.0F, 255.0F);
+        }
+    } else {
+        const auto [srcMin, scale] = getScale(sourceData, 0.0F, 255.0F);
+        mappedData = scaleAndCrop(mappedData, 0.0F, 255.0F, srcMin, scale);
+    }
+
     for (float &value : mappedData) {
         value = std::round(std::clamp(value, 0.0F, 255.0F));
     }

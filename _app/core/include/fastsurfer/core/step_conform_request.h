@@ -13,6 +13,7 @@ struct ConformStepRequest {
     std::string imageSizeMode {"auto"};
     std::string orientation {"lia"};
     float threshold1mm {0.95F};
+    bool forceConform {false};
 };
 
 } // namespace fastsurfer::core

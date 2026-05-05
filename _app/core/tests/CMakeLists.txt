@@ -19,6 +19,8 @@ target_compile_definitions(test_step_conform
 
 add_test(NAME run_conformed_step_on_already_conformed_scan_produce_conformed_output COMMAND test_step_conform conformed)
 
+add_test(NAME run_conform_step_on_already_conformed_scan_should_roundtrip_when_forced COMMAND test_step_conform force-conformed)
+
 add_test(NAME run_conform_step_on_standard_scan_should_produce_conformed_output COMMAND test_step_conform standard)
 
 add_executable(test_native_reconform_non_conformed

@@ -847,6 +847,46 @@ void test_subject140_already_conformed()
             "The conformed output voxel payload differs from the input fixture.");
 }
 
+    void test_subject140_force_conformed_roundtrip()
+    {
+        const std::filesystem::path repoRoot = FASTSURFER_REPO_ROOT;
+        const std::filesystem::path fixturePath = repoRoot / "data/Subject140/140_orig.mgz";
+        const std::filesystem::path outputDir = makeFreshDirectory("fastsurfer_core_native_force_conform_subject140_test");
+
+        const auto copyPath = outputDir / "copy_orig.mgz";
+        const auto conformedPath = outputDir / "conformed_orig.mgz";
+
+        const auto inputImage = fastsurfer::core::MghImage::load(fixturePath);
+        require(!inputImage.rawData().empty(), "The fixture MGZ appears empty or unreadable: " + fixturePath.string());
+
+        fastsurfer::core::ConformStepRequest request;
+        request.inputPath = fixturePath;
+        request.copyOrigPath = copyPath;
+        request.conformedPath = conformedPath;
+        request.forceConform = true;
+
+        fastsurfer::core::ConformStepService service;
+        const auto result = service.run(request);
+
+        require(result.success, "The forced conform step did not succeed on the already conformed Subject140 fixture.");
+        require(!result.alreadyConformed,
+            "Forced conform should bypass the already-conformed shortcut for the Subject140 fixture.");
+        require(std::filesystem::exists(copyPath), "The forced conform step did not write the copy_orig output.");
+        require(std::filesystem::exists(conformedPath), "The forced conform step did not write the conformed output.");
+
+        const SourceOracle sourceOracle = buildSourceOracle(inputImage);
+        const auto copyImage = fastsurfer::core::MghImage::load(copyPath);
+        const auto outputImage = fastsurfer::core::MghImage::load(conformedPath);
+
+        assertCopyOrigMatches(copyImage, inputImage);
+        verifyOutputGeometry(inputImage, sourceOracle, request, result, outputImage);
+
+        require(inputImage.header().dimensions == outputImage.header().dimensions,
+            "Forced conform changed the Subject140 output dimensions.");
+        require(inputImage.rawData() == outputImage.rawData(),
+            "Forced conform changed the Subject140 voxel payload even though the input was already conformed.");
+    }
+
     void test_colin27_mgz_cases()
     {
         const std::filesystem::path repoRoot = FASTSURFER_REPO_ROOT;
@@ -975,6 +1015,11 @@ void runNamedCase(const std::string &caseName)
 {
     if (caseName == "conformed") {
         test_subject140_already_conformed();
+        return;
+    }
+
+    if (caseName == "force-conformed") {
+        test_subject140_force_conformed_roundtrip();
         return;
     }
 
