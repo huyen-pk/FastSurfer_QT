@@ -847,7 +847,7 @@ void test_subject140_already_conformed()
             "The conformed output voxel payload differs from the input fixture.");
 }
 
-    void test_subject140_force_conformed_roundtrip()
+    void test_measure_sampling_errors_by_force_conformed_already_standardized_image()
     {
         const std::filesystem::path repoRoot = FASTSURFER_REPO_ROOT;
         const std::filesystem::path fixturePath = repoRoot / "data/Subject140/140_orig.mgz";
@@ -1019,7 +1019,7 @@ void runNamedCase(const std::string &caseName)
     }
 
     if (caseName == "force-conformed") {
-        test_subject140_force_conformed_roundtrip();
+        test_measure_sampling_errors_by_force_conformed_already_standardized_image();
         return;
     }
 

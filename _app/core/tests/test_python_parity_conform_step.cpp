@@ -246,7 +246,7 @@ void assertExactImageMatch(const std::filesystem::path &leftPath, const std::fil
         return std::system(command.c_str());
     }
 
-    void test_step_conform_subject140_parity()
+    void test_step_conform_standardized_image_parity()
     {
         const std::filesystem::path repoRoot = FASTSURFER_REPO_ROOT;
         const std::filesystem::path fixturePath = repoRoot / "data/Subject140/140_orig.mgz";
@@ -323,7 +323,7 @@ void assertExactImageMatch(const std::filesystem::path &leftPath, const std::fil
         assertComparableConformedImages(nativeConformed, pythonConformed);
     }
 
-    void test_step_conform_oblique_parity()
+    void test_step_conform_oblique_image_parity()
     {
         const std::filesystem::path repoRoot = FASTSURFER_REPO_ROOT;
         const std::filesystem::path fixturePath = repoRoot / "data/parrec_oblique/NIFTI/3D_T1W_trans_35_25_15_SENSE_26_1.nii";
@@ -370,13 +370,13 @@ void assertExactImageMatch(const std::filesystem::path &leftPath, const std::fil
 
     void runNamedCase(const std::string &caseName)
     {
-        if (caseName == "test_step_conform_subject140_parity") {
-            test_step_conform_subject140_parity();
+        if (caseName == "conformed") {
+            test_step_conform_standardized_image_parity();
             return;
         }
 
-        if (caseName == "test_step_conform_oblique_parity") {
-            test_step_conform_oblique_parity();
+        if (caseName == "oblique") {
+            test_step_conform_oblique_image_parity();
             return;
         }
 
@@ -391,8 +391,8 @@ void assertExactImageMatch(const std::filesystem::path &leftPath, const std::fil
             if (argc > 1) {
                 runNamedCase(argv[1]);
             } else {
-                test_step_conform_subject140_parity();
-                test_step_conform_oblique_parity();
+                test_step_conform_standardized_image_parity();
+                test_step_conform_oblique_image_parity();
         }
 
         return 0;

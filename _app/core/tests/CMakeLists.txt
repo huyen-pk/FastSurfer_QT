@@ -19,9 +19,11 @@ target_compile_definitions(test_step_conform
 
 add_test(NAME run_conformed_step_on_already_conformed_scan_produce_conformed_output COMMAND test_step_conform conformed)
 
-add_test(NAME run_conform_step_on_already_conformed_scan_should_roundtrip_when_forced COMMAND test_step_conform force-conformed)
+add_test(NAME run_conform_step_on_already_conformed_scan_should_not_introduce_sampling_errors COMMAND test_step_conform force-conformed)
 
 add_test(NAME run_conform_step_on_standard_scan_should_produce_conformed_output COMMAND test_step_conform standard)
+
+add_test(NAME run_conform_step_on_oblique_scan_should_produce_conformed_output COMMAND test_step_conform oblique)
 
 add_executable(test_native_reconform_non_conformed
     test_native_reconform_non_conformed.cpp
@@ -53,9 +55,9 @@ target_compile_definitions(test_python_parity_conform_step
         FASTSURFER_REPO_ROOT="${FASTSURFER_REPO_ROOT}"
 )
 
-add_test(NAME run_conform_step_should_match_python_reference_on_mgz_fixture COMMAND test_python_parity_conform_step test_step_conform_subject140_parity)
+add_test(NAME run_conform_step_should_match_python_reference_on_conformed_image COMMAND test_python_parity_conform_step conformed)
 
-add_test(NAME test_step_conform_oblique_parity COMMAND test_python_parity_conform_step test_step_conform_oblique_parity)
+add_test(NAME run_conform_step_should_match_python_reference_on_oblique_image COMMAND test_python_parity_conform_step oblique)
 
 add_executable(test_nifti_converter
     test_nifti_converter.cpp
@@ -89,4 +91,3 @@ target_compile_definitions(test_nifti_converter_roundtrip
 
 add_test(NAME convert_nifti_to_mgz_and_back_should_produce_original_image COMMAND test_nifti_converter_roundtrip)
 
-add_test(NAME run_conform_step_on_oblique_scan_should_produce_conformed_output COMMAND test_step_conform oblique)
