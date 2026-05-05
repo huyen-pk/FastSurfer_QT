@@ -6,8 +6,8 @@
 #include <QVariant>
 #include <QVariantMap>
 
-#include "fastsurfer/core/conform_step_request.h"
-#include "fastsurfer/core/conform_step_service.h"
+#include "fastsurfer/core/step_conform_request.h"
+#include "fastsurfer/core/step_conform.h"
 
 namespace {
 

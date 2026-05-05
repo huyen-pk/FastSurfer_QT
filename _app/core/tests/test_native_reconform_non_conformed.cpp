@@ -6,8 +6,8 @@
 #include <string>
 #include <vector>
 
-#include "fastsurfer/core/conform_step_request.h"
-#include "fastsurfer/core/conform_step_service.h"
+#include "fastsurfer/core/step_conform_request.h"
+#include "fastsurfer/core/step_conform.h"
 #include "fastsurfer/core/mgh_image.h"
 
 namespace {
@@ -31,6 +31,7 @@ fastsurfer::core::MghImage createSyntheticNonConformedInput(const std::filesyste
 {
     const auto sourceImage = fastsurfer::core::MghImage::load(fixturePath);
     const auto sourceData = sourceImage.voxelDataAsFloat();
+    require(!sourceData.empty(), "The fixture MGZ appears empty or unreadable: " + fixturePath.string());
 
     fastsurfer::core::MghImage::Header header = sourceImage.header();
     header.dimensions = {64, 72, 80};

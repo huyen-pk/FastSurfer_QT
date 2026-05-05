@@ -77,16 +77,16 @@ Proposed structure:
 _app/core/
   CMakeLists.txt
   include/
-    fastsurfer/core/conform_step_request.h
-    fastsurfer/core/conform_step_result.h
-    fastsurfer/core/conform_step_service.h
+    fastsurfer/core/step_conform_request.h
+    fastsurfer/core/step_conform_result.h
+    fastsurfer/core/step_conform.h
     fastsurfer/core/image_metadata.h
   src/
-    conform_step_service.cpp
+    step_conform.cpp
     image_metadata.cpp
   tests/
     CMakeLists.txt
-    test_conform_step_service.cpp
+    test_step_conform.cpp
     test_python_parity_conform_step.cpp
 ```
 
@@ -184,7 +184,7 @@ The parity test should compare:
 
 All new tests should follow the repository convention requested by the tester role, for example:
 
-- `run_conform_step_should_write_copy_and_conformed_outputs`
+- `run_conformed_step_on_already_conformed_scan_produce_conformed_output`
 - `run_conform_step_should_match_python_reference_on_subject140_mgz_fixture`
 
 ## Verification Plan

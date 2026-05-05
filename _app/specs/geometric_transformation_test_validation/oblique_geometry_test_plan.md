@@ -6,17 +6,17 @@
 
 ## Executive Summary
 
-Strengthen the end-to-end oblique conform verification in `_app/core/tests/test_conform_step_service_nifti.cpp` instead of creating a separate geometry-only harness. Keep `_app/core/tests/test_nifti_converter.cpp` as an ingress and MGZ-serialization test only. For the conform test, use ITK as the spatial oracle for image geometry, physical-point transforms, and interpolation, and use Eigen for independent affine and rigid-geometry checks. Limit custom test math to FastSurfer-specific policy rules such as target voxel-size selection, FOV sizing rules, and optional final intensity scaling checks.
+Strengthen the end-to-end oblique conform verification in `_app/core/tests/test_step_conform_oblique.cpp` instead of creating a separate geometry-only harness. Keep `_app/core/tests/test_nifti_converter.cpp` as an ingress and MGZ-serialization test only. For the conform test, use ITK as the spatial oracle for image geometry, physical-point transforms, and interpolation, and use Eigen for independent affine and rigid-geometry checks. Limit custom test math to FastSurfer-specific policy rules such as target voxel-size selection, FOV sizing rules, and optional final intensity scaling checks.
 
 ## 1. Test Target And File Placement
 
 ### Primary End-to-End Verification File
-Path: `_app/core/tests/test_conform_step_service_nifti.cpp`
+Path: `_app/core/tests/test_step_conform_oblique.cpp`
 
 Rationale:
 - This file already exercises `ConformStepService::run()` on a real oblique NIfTI fixture.
 - The missing coverage is not loader support; it is output affine correctness, physical-center preservation, target-header correctness, and oblique resampling geometry.
-- Keeping the test in the end-to-end conform harness aligns with QA separation of responsibilities: converter verification stays in `_app/core/tests/test_nifti_converter.cpp`, while release-gate oblique conform correctness stays in `_app/core/tests/test_conform_step_service_nifti.cpp`.
+- Keeping the test in the end-to-end conform harness aligns with QA separation of responsibilities: converter verification stays in `_app/core/tests/test_nifti_converter.cpp`, while release-gate oblique conform correctness stays in `_app/core/tests/test_step_conform_oblique.cpp`.
 
 ### Supporting Ingress Test
 Path: `_app/core/tests/test_nifti_converter.cpp`
@@ -33,7 +33,7 @@ Use `data/parrec_oblique/NIFTI/3D_T1W_trans_35_25_15_SENSE_26_1.nii` as the main
 Why this fixture:
 - it is a real 3D oblique volume rather than a 2D slice stack surrogate
 - it exercises through-plane geometry as well as in-plane rotation
-- it is already the fixture used by the current `test_conform_step_service_nifti.cpp`
+- it is already the fixture used by the current `test_step_conform_oblique.cpp`
 
 ### Optional Secondary Fixture
 Use `data/parrec_oblique/NIFTI/T1W_trans_5_15_30_SENSE_10_1.nii` later as a lighter-weight oblique regression, but do not make it the main conform geometry oracle.
@@ -89,7 +89,7 @@ Use libraries for verification:
 Run the same oblique 3D fixture through `ConformStepService::run()` with `orientation="lia"`.
 
 Purpose:
-- exercise the full oblique-to-target orientation transform produced by `buildTargetHeader()` in `_app/core/src/conform_step_service.cpp`
+- exercise the full oblique-to-target orientation transform produced by `buildTargetHeader()` in `_app/core/src/step_conform.cpp`
 
 Use libraries for verification:
 - ITK: spatial probe sampling across the resampled output volume
@@ -215,7 +215,7 @@ Mitigation:
 ## 11. Verification Criteria
 
 1. `test_nifti_converter.cpp` continues to pass and remains scoped to ingress and MGZ serialization.
-2. `test_conform_step_service_nifti.cpp` passes on the 3D oblique fixture for `orientation="native"` and `orientation="lia"`.
+2. `test_step_conform_oblique.cpp` passes on the 3D oblique fixture for `orientation="native"` and `orientation="lia"`.
 3. Output affine, center preservation, spacing, dimensions, and handedness all satisfy hard thresholds.
 4. ITK-interpolated probe checks satisfy max and 95th-percentile numeric thresholds.
 5. No part of the primary oblique conform verification depends on Python parity.
@@ -223,7 +223,7 @@ Mitigation:
 ## 12. Summary
 
 - Keep `_app/core/tests/test_nifti_converter.cpp` for conversion ingress only.
-- Strengthen `_app/core/tests/test_conform_step_service_nifti.cpp` into the primary end-to-end oblique conform verification.
+- Strengthen `_app/core/tests/test_step_conform_oblique.cpp` into the primary end-to-end oblique conform verification.
 - Use ITK for physical-space geometry and interpolation checks.
 - Use Eigen for independent affine, determinant, orthonormality, and center-preservation checks.
 - Keep custom test computation only for FastSurfer-specific conform policy rules.

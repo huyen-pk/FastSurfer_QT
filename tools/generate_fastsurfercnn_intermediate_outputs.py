@@ -118,6 +118,12 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Optional log file path.",
     )
+    parser.add_argument(
+        "--stop-after-step",
+        type=int,
+        default=None,
+        help="Optional highest step id to generate before exiting early.",
+    )
     return parser.parse_args()
 
 
@@ -148,13 +154,28 @@ def write_json(path: Path, payload: dict[str, Any]) -> None:
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
+def should_stop_after(step_id: int, stop_after_step: int | None) -> bool:
+    return stop_after_step is not None and step_id >= stop_after_step
+
+
 def format_repo_path(path: Path) -> str:
     resolved = (BASELINE_FASTSURFER_ROOT / path).resolve() if not path.is_absolute() else path.resolve()
     return str(resolved.relative_to(REPO_ROOT) if resolved.is_relative_to(REPO_ROOT) else resolved)
 
 
+def normalize_save_dtype(path: Path, np_data: np.ndarray, dtype: Any | None) -> tuple[np.ndarray, Any | None]:
+    target_dtype = np.dtype(dtype) if dtype is not None else np_data.dtype
+
+    if path.suffix.lower() == ".mgz" and target_dtype == np.float64:
+        target_dtype = np.dtype(np.float32)
+        np_data = np_data.astype(target_dtype, copy=False)
+
+    return np_data, target_dtype
+
+
 def save_volume(path: Path, data: np.ndarray | torch.Tensor, reference_img, dtype: Any | None = None) -> None:
     np_data = data if isinstance(data, np.ndarray) else data.detach().cpu().numpy()
+    np_data, dtype = normalize_save_dtype(path, np_data, dtype)
     header = reference_img.header.copy()
     if dtype is not None:
         header.set_data_dtype(dtype)
@@ -319,6 +340,17 @@ def main() -> int:
             "conformed_zooms": [float(value) for value in conformed_img.header.get_zooms()[:3]],
         },
     )
+    if should_stop_after(2, args.stop_after_step):
+        write_json(
+            subject_root / "run_summary.json",
+            {
+                "subject_name": subject_name,
+                "input": str(input_path.relative_to(REPO_ROOT) if input_path.is_relative_to(REPO_ROOT) else input_path),
+                "output_root": str(subject_root.relative_to(REPO_ROOT) if subject_root.is_relative_to(REPO_ROOT) else subject_root),
+                "stopped_after_step": 2,
+            },
+        )
+        return 0
 
     step3_dir = step_dirs[3]
     native_zoom = np.asarray(conformed_img.header.get_zooms()[:3], dtype=float)
@@ -339,6 +371,17 @@ def main() -> int:
             "zoom_in_lia": [float(value) for value in np.asarray(zoom_in_lia).tolist()],
         },
     )
+    if should_stop_after(3, args.stop_after_step):
+        write_json(
+            subject_root / "run_summary.json",
+            {
+                "subject_name": subject_name,
+                "input": str(input_path.relative_to(REPO_ROOT) if input_path.is_relative_to(REPO_ROOT) else input_path),
+                "output_root": str(subject_root.relative_to(REPO_ROOT) if subject_root.is_relative_to(REPO_ROOT) else subject_root),
+                "stopped_after_step": 3,
+            },
+        )
+        return 0
 
     step4_dir = step_dirs[4]
     pred_prob = torch.zeros(

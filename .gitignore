@@ -11,6 +11,7 @@
 install-skills.sh
 skills-lock.json
 .agents/skills
+**/tmp/
 
 # Model weights (tests)
 /onnx/
@@ -41,11 +42,11 @@ junit-results.xml
 .pytest_cache/
 */out/
 /app/**/data/
-/test/data/
-/test/output/
+**/test/data/
+**/test/output/
 /checkpoints/
 /generated/
-/.tmp/
+**/.tmp/
 
 # Desktop app build artifacts
 

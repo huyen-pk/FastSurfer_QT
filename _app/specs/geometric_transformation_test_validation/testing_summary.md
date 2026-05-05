@@ -8,13 +8,13 @@
 ## Commands Run
 
 - `cmake -S /home/huyenpk/Projects/FastSurfer_QT/_app/core -B /home/huyenpk/Projects/FastSurfer_QT/_app/core/build`
-- `cmake --build /home/huyenpk/Projects/FastSurfer_QT/_app/core/build --target test_conform_step_service_nifti`
-- `cd /home/huyenpk/Projects/FastSurfer_QT/_app/core/build/tests && ./test_conform_step_service_nifti`
+- `cmake --build /home/huyenpk/Projects/FastSurfer_QT/_app/core/build --target test_step_conform_oblique`
+- `cd /home/huyenpk/Projects/FastSurfer_QT/_app/core/build/tests && ./test_step_conform_oblique`
 - `cd /home/huyenpk/Projects/FastSurfer_QT/_app/core/build/tests && ./test_nifti_converter`
 
 ## Results
 
-- `run_conform_step_on_nifti_input_should_write_copy_and_conformed_outputs`: passed
+- `run_conform_step_on_oblique_scan_should_produce_conformed_output`: passed
 - `convert_nifti_to_mgz_should_preserve_expected_geometry_and_voxels`: passed
 - `run_conform_step_on_non_conformed_mgz_should_produce_conformed_output`: not rerun in this change set; still known to fail for a pre-existing fixture-path issue
 

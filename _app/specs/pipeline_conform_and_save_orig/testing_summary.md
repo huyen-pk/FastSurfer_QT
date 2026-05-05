@@ -31,7 +31,7 @@ Result:
 Commands run:
 
 ```bash
-_app/core/build/tests/test_conform_step_service
+_app/core/build/tests/test_step_conform
 _app/core/build/tests/test_python_parity_conform_step
 ```
 

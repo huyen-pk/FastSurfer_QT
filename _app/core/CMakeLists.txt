@@ -22,7 +22,7 @@ find_package(ZLIB REQUIRED)
 include(${ITK_USE_FILE})
 
 add_library(fastsurfer_core STATIC
-    src/conform_step_service.cpp
+    src/step_conform.cpp
     src/mgh_image.cpp
     src/nifti_converter.cpp
 )

@@ -1,5 +1,6 @@
 #include <array>
 #include <cmath>
+#include <cstdlib>
 #include <filesystem>
 #include <iostream>
 #include <stdexcept>
@@ -27,7 +28,14 @@ struct FixtureExpectation {
 
 std::filesystem::path makeFreshDirectory(const std::string &name)
 {
-    const auto root = std::filesystem::temp_directory_path() / name;
+    if (const char *envTmp = std::getenv("FASTSURFER_TEST_TMPDIR"); envTmp != nullptr && envTmp[0] != '\0') {
+        const auto root = std::filesystem::path(envTmp) / name;
+        std::filesystem::remove_all(root);
+        std::filesystem::create_directories(root);
+        return root;
+    }
+
+    const auto root = std::filesystem::temp_directory_path() / std::string("fastsurfer_tests") / name;
     std::filesystem::remove_all(root);
     std::filesystem::create_directories(root);
     return root;
@@ -74,10 +82,10 @@ std::vector<FixtureExpectation> fixtureExpectations()
             "data/parrec_oblique/NIFTI/T1W_trans_0_0_0_SENSE_4_1.nii",
             {560, 560, 1},
             {0.42857143F, 0.42857143F, 5.0F},
-            "RAS",
+            "LPS",
             fastsurfer::core::Matrix4 {{
-                {{0.428571433, 0.0, 0.0, -122.404823303}},
-                {{0.0, 0.428571433, 0.0, -130.220428467}},
+                {{-0.428571433, 0.0, 0.0, 122.404823303}},
+                {{0.0, -0.428571433, 0.0, 130.220428467}},
                 {{0.0, 0.0, 5.0, 0.0}},
                 {{0.0, 0.0, 0.0, 1.0}},
             }},
@@ -91,10 +99,10 @@ std::vector<FixtureExpectation> fixtureExpectations()
             "data/parrec_oblique/NIFTI/3D_T1W_trans_35_25_15_SENSE_26_1.nii",
             {320, 320, 180},
             {0.8F, 0.8F, 1.0F},
-            "RAS",
+            "LPS",
             fastsurfer::core::Matrix4 {{
-                {{0.632992056, -0.169609815, 0.573576472, -126.919281006}},
-                {{0.374971205, 0.650149859, -0.346188561, -133.138259888}},
+                {{-0.632992056, 0.169609815, -0.573576472, 126.919281006}},
+                {{-0.374971205, -0.650149859, 0.346188561, 133.138259888}},
                 {{-0.314193685, 0.434209270, 0.742403873, -74.587806702}},
                 {{0.0, 0.0, 0.0, 1.0}},
             }},

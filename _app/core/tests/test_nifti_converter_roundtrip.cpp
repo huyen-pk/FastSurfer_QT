@@ -11,7 +11,14 @@ namespace {
 
 std::filesystem::path makeFreshDirectory(const std::string &name)
 {
-    const auto root = std::filesystem::temp_directory_path() / name;
+    if (const char *envTmp = std::getenv("FASTSURFER_TEST_TMPDIR"); envTmp != nullptr && envTmp[0] != '\0') {
+        const auto root = std::filesystem::path(envTmp) / name;
+        std::filesystem::remove_all(root);
+        std::filesystem::create_directories(root);
+        return root;
+    }
+
+    const auto root = std::filesystem::temp_directory_path() / std::string("fastsurfer_tests") / name;
     std::filesystem::remove_all(root);
     std::filesystem::create_directories(root);
     return root;

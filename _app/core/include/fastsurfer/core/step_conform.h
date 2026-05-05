@@ -1,7 +1,7 @@
 #pragma once
 
-#include "fastsurfer/core/conform_step_request.h"
-#include "fastsurfer/core/conform_step_result.h"
+#include "fastsurfer/core/step_conform_request.h"
+#include "fastsurfer/core/step_conform_result.h"
 #include "fastsurfer/core/mgh_image.h"
 
 namespace fastsurfer::core {

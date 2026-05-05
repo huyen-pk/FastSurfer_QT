@@ -2,6 +2,7 @@
 #include <array>
 #include <cmath>
 #include <cctype>
+#include <cstdlib>
 #include <filesystem>
 #include <iostream>
 #include <limits>
@@ -14,12 +15,10 @@
 #include <itkImage.h>
 #include <itkImportImageFilter.h>
 #include <itkLinearInterpolateImageFunction.h>
-#include <itkOrientImageFilter.h>
-#include <itkSpatialOrientation.h>
 
-#include "fastsurfer/core/conform_step_request.h"
-#include "fastsurfer/core/conform_step_result.h"
-#include "fastsurfer/core/conform_step_service.h"
+#include "fastsurfer/core/step_conform_request.h"
+#include "fastsurfer/core/step_conform_result.h"
+#include "fastsurfer/core/step_conform.h"
 #include "fastsurfer/core/mgh_image.h"
 #include "fastsurfer/core/nifti_converter.h"
 
@@ -28,8 +27,6 @@ namespace {
 using FloatImage3D = itk::Image<float, 3>;
 using ImportFilter = itk::ImportImageFilter<float, 3>;
 using InterpolatorType = itk::LinearInterpolateImageFunction<FloatImage3D, double>;
-using OrientFilter = itk::OrientImageFilter<FloatImage3D, FloatImage3D>;
-using OrientationEnum = itk::SpatialOrientation::ValidCoordinateOrientationFlags;
 
 struct SourceOracle {
     std::vector<float> data;
@@ -50,7 +47,14 @@ struct ProbeStats {
 
 std::filesystem::path makeFreshDirectory(const std::string &name)
 {
-    const auto root = std::filesystem::current_path() / ".tmp" / name;
+    if (const char *envTmp = std::getenv("FASTSURFER_TEST_TMPDIR"); envTmp != nullptr && envTmp[0] != '\0') {
+        const auto root = std::filesystem::path(envTmp) / name;
+        std::filesystem::remove_all(root);
+        std::filesystem::create_directories(root);
+        return root;
+    }
+
+    const auto root = std::filesystem::temp_directory_path() / std::string("fastsurfer_tests") / name;
     std::filesystem::remove_all(root);
     std::filesystem::create_directories(root);
     return root;
@@ -132,21 +136,100 @@ std::string normalizeUpper(std::string value)
     return value;
 }
 
-OrientationEnum itkOrientationEnum(const std::string &orientation)
+int axisGroup(const char axisCode)
 {
-    const std::string normalized = normalizeUpper(orientation);
-    if (normalized == "LIA") {
-        return itk::SpatialOrientation::ITK_COORDINATE_ORIENTATION_LIA;
+    switch (static_cast<char>(std::toupper(static_cast<unsigned char>(axisCode)))) {
+    case 'L':
+    case 'R':
+        return 0;
+    case 'P':
+    case 'A':
+        return 1;
+    case 'I':
+    case 'S':
+        return 2;
+    default:
+        throw std::runtime_error(std::string("Unsupported orientation axis code in the merged conform oracle: '") + axisCode + "'.");
+    }
+}
+
+FloatImage3D::DirectionType directionFromOrientation(const std::string &orientation)
+{
+    FloatImage3D::DirectionType direction;
+    direction.SetIdentity();
+
+    const auto normalized = normalizeUpper(orientation);
+    for (unsigned int column = 0; column < 3; ++column) {
+        direction[0][column] = 0.0;
+        direction[1][column] = 0.0;
+        direction[2][column] = 0.0;
+
+        switch (normalized[column]) {
+        case 'R':
+            direction[0][column] = 1.0;
+            break;
+        case 'L':
+            direction[0][column] = -1.0;
+            break;
+        case 'A':
+            direction[1][column] = 1.0;
+            break;
+        case 'P':
+            direction[1][column] = -1.0;
+            break;
+        case 'S':
+            direction[2][column] = 1.0;
+            break;
+        case 'I':
+            direction[2][column] = -1.0;
+            break;
+        default:
+            throw std::runtime_error(
+                "Unsupported target orientation for the merged conform oracle: '" + normalized + "'.");
+        }
     }
 
-    throw std::runtime_error(
-        "Unsupported ITK target orientation for the oblique conform oracle: '" + normalized + "'.");
+    return direction;
+}
+
+std::array<int, 3> targetDimensionsForOrientation(
+    const std::array<int, 3> &nativeTargetDimensions,
+    const std::string &sourceOrientation,
+    const std::string &requestedOrientation)
+{
+    const auto normalizedTarget = normalizeUpper(requestedOrientation);
+    if (normalizedTarget == normalizeUpper(sourceOrientation)) {
+        return nativeTargetDimensions;
+    }
+
+    std::array<int, 3> targetDimensions {};
+    for (int targetAxis = 0; targetAxis < 3; ++targetAxis) {
+        const int targetGroup = axisGroup(normalizedTarget[targetAxis]);
+        bool found = false;
+        for (int sourceAxis = 0; sourceAxis < 3; ++sourceAxis) {
+            if (axisGroup(sourceOrientation[sourceAxis]) != targetGroup) {
+                continue;
+            }
+
+            targetDimensions[targetAxis] = nativeTargetDimensions[sourceAxis];
+            found = true;
+            break;
+        }
+
+        if (!found) {
+            throw std::runtime_error(
+                "Could not derive target dimensions for the merged conform oracle. Source='" +
+                sourceOrientation + "' target='" + normalizedTarget + "'.");
+        }
+    }
+
+    return targetDimensions;
 }
 
 float computeTargetVoxelSize(const fastsurfer::core::MghImage &image, const fastsurfer::core::ConformStepRequest &request)
 {
     if (request.voxSizeMode != "min") {
-        throw std::runtime_error("Unsupported vox_size mode in the oblique conform oracle.");
+        throw std::runtime_error("Unsupported vox_size mode in the merged conform oracle.");
     }
 
     float targetVoxelSize = std::min(roundToEpsilonPrecision(image.minVoxelSize()), 1.0F);
@@ -185,15 +268,15 @@ std::array<int, 3> computeNativeTargetDimensions(
         return target;
     }
 
-    throw std::runtime_error("Unsupported image_size mode in the oblique conform oracle.");
+    throw std::runtime_error("Unsupported image_size mode in the merged conform oracle.");
 }
 
 Eigen::Vector4d voxelCenter(const std::array<int, 3> &dimensions)
 {
     return {
-        static_cast<double>(dimensions[0]) / 2.0,
-        static_cast<double>(dimensions[1]) / 2.0,
-        static_cast<double>(dimensions[2]) / 2.0,
+        (static_cast<double>(dimensions[0]) - 1.0) / 2.0,
+        (static_cast<double>(dimensions[1]) - 1.0) / 2.0,
+        (static_cast<double>(dimensions[2]) - 1.0) / 2.0,
         1.0,
     };
 }
@@ -298,6 +381,72 @@ FloatImage3D::PointType computeOriginFromCenter(
     return origin;
 }
 
+bool isClose(const double left, const double right, const double epsilon)
+{
+    return std::fabs(left - right) <= epsilon;
+}
+
+Eigen::Matrix4d affineFromGeometry(
+    const FloatImage3D::DirectionType &direction,
+    const FloatImage3D::SpacingType &spacing,
+    const FloatImage3D::PointType &origin)
+{
+    Eigen::Matrix4d affine = Eigen::Matrix4d::Identity();
+    const Eigen::Matrix3d directionMatrix = toDirectionMatrix(direction);
+
+    for (int column = 0; column < 3; ++column) {
+        affine.block<3, 1>(0, column) = directionMatrix.col(column) * spacing[column];
+    }
+
+    affine(0, 3) = origin[0];
+    affine(1, 3) = origin[1];
+    affine(2, 3) = origin[2];
+    return affine;
+}
+
+bool rotationRequiresInterpolation(const Eigen::Matrix4d &vox2vox)
+{
+    for (int row = 0; row < 3; ++row) {
+        for (int column = 0; column < 3; ++column) {
+            const double absoluteValue = std::fabs(vox2vox(row, column));
+            if (!isClose(absoluteValue, 1.0, 1.0e-4) && !isClose(absoluteValue, 0.0, 1.0e-6)) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+Eigen::Matrix3d scaledDirectionMatrix(
+    const FloatImage3D::DirectionType &direction,
+    const FloatImage3D::SpacingType &spacing)
+{
+    Eigen::Matrix3d linear = Eigen::Matrix3d::Zero();
+    const Eigen::Matrix3d directionMatrix = toDirectionMatrix(direction);
+    for (int column = 0; column < 3; ++column) {
+        linear.col(column) = directionMatrix.col(column) * spacing[column];
+    }
+    return linear;
+}
+
+Eigen::Vector3d translationToFixCenter(
+    const Eigen::Matrix3d &vox2voxLinear,
+    const std::array<int, 3> &sourceDimensions,
+    const std::array<int, 3> &targetDimensions)
+{
+    const Eigen::Vector3d sourceCenter {
+        (static_cast<double>(sourceDimensions[0]) - 1.0) / 2.0,
+        (static_cast<double>(sourceDimensions[1]) - 1.0) / 2.0,
+        (static_cast<double>(sourceDimensions[2]) - 1.0) / 2.0,
+    };
+    const Eigen::Vector3d targetCenter {
+        (static_cast<double>(targetDimensions[0]) - 1.0) / 2.0,
+        (static_cast<double>(targetDimensions[1]) - 1.0) / 2.0,
+        (static_cast<double>(targetDimensions[2]) - 1.0) / 2.0,
+    };
+    return sourceCenter - vox2voxLinear * targetCenter;
+}
+
 FloatImage3D::Pointer buildExpectedGeometry(
     const fastsurfer::core::MghImage &sourceImage,
     const SourceOracle &sourceOracle,
@@ -305,33 +454,46 @@ FloatImage3D::Pointer buildExpectedGeometry(
     const float targetVoxelSize,
     const std::array<int, 3> &nativeTargetDimensions)
 {
+    const bool useNativeOrientation = request.orientation == "native";
+    const std::string targetOrientation = useNativeOrientation
+        ? sourceImage.orientationCode()
+        : normalizeUpper(request.orientation);
+    const auto targetDimensions = useNativeOrientation
+        ? nativeTargetDimensions
+        : targetDimensionsForOrientation(
+              nativeTargetDimensions,
+              sourceImage.orientationCode(),
+              targetOrientation);
+
     auto expectedGeometry = FloatImage3D::New();
-    expectedGeometry->SetRegions(itkRegionFromDimensions(nativeTargetDimensions));
+    expectedGeometry->SetRegions(itkRegionFromDimensions(targetDimensions));
 
     FloatImage3D::SpacingType spacing;
     spacing.Fill(static_cast<double>(targetVoxelSize));
     expectedGeometry->SetSpacing(spacing);
-    expectedGeometry->SetDirection(itkDirectionFromHeader(sourceImage.header()));
-    expectedGeometry->SetOrigin(computeOriginFromCenter(
-        expectedGeometry->GetDirection(),
-        spacing,
-        nativeTargetDimensions,
-        physicalCenter(sourceOracle.image, sourceImage.header().dimensions)));
+    expectedGeometry->SetDirection(useNativeOrientation
+        ? itkDirectionFromHeader(sourceImage.header())
+        : directionFromOrientation(targetOrientation));
+
+    const Eigen::Matrix4d sourceAffine = toEigenMatrix(sourceImage.affine());
+    const Eigen::Matrix3d targetLinear = scaledDirectionMatrix(expectedGeometry->GetDirection(), spacing);
+    const Eigen::Matrix3d vox2voxLinear = sourceAffine.topLeftCorner<3, 3>().inverse() * targetLinear;
+    const Eigen::Vector3d vox2voxTranslation =
+        translationToFixCenter(vox2voxLinear, sourceImage.header().dimensions, targetDimensions);
+
+    Eigen::Matrix4d targetAffine = Eigen::Matrix4d::Identity();
+    targetAffine.topLeftCorner<3, 3>() = targetLinear;
+    targetAffine.block<3, 1>(0, 3) =
+        (sourceAffine * Eigen::Vector4d(vox2voxTranslation[0], vox2voxTranslation[1], vox2voxTranslation[2], 1.0)).head<3>();
+
+    FloatImage3D::PointType origin;
+    origin[0] = targetAffine(0, 3);
+    origin[1] = targetAffine(1, 3);
+    origin[2] = targetAffine(2, 3);
+    expectedGeometry->SetOrigin(origin);
+
     expectedGeometry->Allocate();
-
-    if (request.orientation == "native") {
-        return expectedGeometry;
-    }
-
-    auto orientFilter = OrientFilter::New();
-    orientFilter->UseImageDirectionOn();
-    orientFilter->SetDesiredCoordinateOrientation(itkOrientationEnum(request.orientation));
-    orientFilter->SetInput(expectedGeometry);
-    orientFilter->Update();
-
-    auto orientedGeometry = orientFilter->GetOutput();
-    orientedGeometry->DisconnectPipeline();
-    return orientedGeometry;
+    return expectedGeometry;
 }
 
 SourceOracle buildSourceOracle(const fastsurfer::core::MghImage &image)
@@ -544,7 +706,7 @@ void assertCopyOrigMatches(
         "The copy-orig MGZ affine differs from the direct NIfTI conversion affine.");
 }
 
-void verifyOutputCase(
+void verifyOutputGeometry(
     const fastsurfer::core::MghImage &sourceImage,
     const SourceOracle &sourceOracle,
     const fastsurfer::core::ConformStepRequest &request,
@@ -582,13 +744,13 @@ void verifyOutputCase(
         (toEigenVector(outputGeometry->GetOrigin()) - toEigenVector(expectedGeometry->GetOrigin())).norm(),
         0.0,
         1.0e-4,
-        "The conformed MGZ origin differs from the independent oblique geometry oracle.");
+        "The conformed MGZ origin differs from the merged conform geometry oracle.");
 
     assertMatrixClose(
         toEigenVector(outputGeometry->GetSpacing()),
         toEigenVector(expectedGeometry->GetSpacing()),
         1.0e-5,
-        "The conformed MGZ spacing differs from the independent oblique geometry oracle.");
+        "The conformed MGZ spacing differs from the merged conform geometry oracle.");
 
     const Eigen::Matrix3d actualDirection = toDirectionMatrix(outputGeometry->GetDirection());
     const Eigen::Matrix3d expectedDirection = toDirectionMatrix(expectedGeometry->GetDirection());
@@ -606,12 +768,29 @@ void verifyOutputCase(
                 "The conformed direction handedness differs from the expected orientation policy.");
 
     requireNear(
-        (toEigenVector(physicalCenter(sourceOracle.image, sourceImage.header().dimensions)) -
+        (toEigenVector(physicalCenter(expectedGeometry, expectedDimensions)) -
          toEigenVector(physicalCenter(outputGeometry, outputImage.header().dimensions)))
             .norm(),
         0.0,
         1.0e-4,
-                "The conformed output does not preserve the source world-space center.");
+        "The conformed output center differs from the expected conform geometry.");
+}
+
+void verifyOutputCase(
+    const fastsurfer::core::MghImage &sourceImage,
+    const SourceOracle &sourceOracle,
+    const fastsurfer::core::ConformStepRequest &request,
+    const fastsurfer::core::ConformStepResult &result,
+    const fastsurfer::core::MghImage &outputImage)
+{
+    verifyOutputGeometry(sourceImage, sourceOracle, request, result, outputImage);
+
+    const float targetVoxelSize = computeTargetVoxelSize(sourceImage, request);
+    const auto nativeTargetDimensions =
+        computeNativeTargetDimensions(sourceImage, targetVoxelSize, request.imageSizeMode);
+    const auto expectedGeometry =
+        buildExpectedGeometry(sourceImage, sourceOracle, request, targetVoxelSize, nativeTargetDimensions);
+    const auto outputGeometry = buildGeometryImage(outputImage);
 
     const auto probeStats = evaluateProbes(
         outputImage,
@@ -628,69 +807,201 @@ void verifyOutputCase(
             "The conformed output exceeded the 95th-percentile ITK-interpolated probe intensity error tolerance.");
 }
 
-} // namespace
-
-int main()
+void test_subject140_already_conformed()
 {
-    try {
-        const std::filesystem::path repoRoot = FASTSURFER_REPO_ROOT;
-        const auto fixturePath = repoRoot / "data/parrec_oblique/NIFTI/3D_T1W_trans_35_25_15_SENSE_26_1.nii";
-        const auto outputDir = makeFreshDirectory("fastsurfer_core_conform_step_nifti_test");
-        const auto expectedCopy = fastsurfer::core::NiftiConverter::loadAsMgh(fixturePath);
+    const std::filesystem::path repoRoot = FASTSURFER_REPO_ROOT;
+    const std::filesystem::path fixturePath = repoRoot / "data/Subject140/140_orig.mgz";
+    const std::filesystem::path outputDir = makeFreshDirectory("fastsurfer_core_native_conform_step_test");
 
-        require(expectedCopy.header().dimensions == std::array<int, 3> {320, 320, 180},
-                "The direct NIfTI conversion produced unexpected input dimensions for the oblique fixture.");
-        require(expectedCopy.orientationCode() == "RAS",
-                "The direct NIfTI conversion produced an unexpected input orientation for the oblique fixture.");
-        requireNear(expectedCopy.header().spacing[0], 0.8F, 1.0e-5F,
-                    "The direct NIfTI conversion produced unexpected X spacing for the oblique fixture.");
-        requireNear(expectedCopy.header().spacing[1], 0.8F, 1.0e-5F,
-                    "The direct NIfTI conversion produced unexpected Y spacing for the oblique fixture.");
-        requireNear(expectedCopy.header().spacing[2], 1.0F, 1.0e-5F,
-                    "The direct NIfTI conversion produced unexpected Z spacing for the oblique fixture.");
+    const auto copyPath = outputDir / "copy_orig.mgz";
+    const auto conformedPath = outputDir / "conformed_orig.mgz";
+
+    const auto inputImage = fastsurfer::core::MghImage::load(fixturePath);
+    require(!inputImage.rawData().empty(), "The fixture MGZ appears empty or unreadable: " + fixturePath.string());
+    require(inputImage.orientationCode().size() == 3 && inputImage.orientationCode().find('?') == std::string::npos,
+        "The fixture orientation code could not be derived from the MGZ header: '" + inputImage.orientationCode() + "'.");
+
+    fastsurfer::core::ConformStepRequest request;
+    request.inputPath = fixturePath;
+    request.copyOrigPath = copyPath;
+    request.conformedPath = conformedPath;
+
+    fastsurfer::core::ConformStepService service;
+    const auto result = service.run(request);
+
+    require(result.success, "The native conform step did not succeed.");
+    require(result.alreadyConformed, "The Subject140 fixture should be treated as already conformed.");
+    require(std::filesystem::exists(copyPath), "The native conform step did not write the copy_orig output.");
+    require(std::filesystem::exists(conformedPath), "The native conform step did not write the conformed output.");
+
+        const SourceOracle sourceOracle = buildSourceOracle(inputImage);
+        const auto copyImage = fastsurfer::core::MghImage::load(copyPath);
+    const auto outputImage = fastsurfer::core::MghImage::load(conformedPath);
+
+        assertCopyOrigMatches(copyImage, inputImage);
+            verifyOutputGeometry(inputImage, sourceOracle, request, result, outputImage);
+
+    require(inputImage.header().dimensions == outputImage.header().dimensions,
+            "The conformed output dimensions differ from the input fixture.");
+    require(inputImage.rawData() == outputImage.rawData(),
+            "The conformed output voxel payload differs from the input fixture.");
+}
+
+    void test_colin27_mgz_cases()
+    {
+        const std::filesystem::path repoRoot = FASTSURFER_REPO_ROOT;
+        const auto fixturePath = repoRoot /
+                     "data/Colin27-1/Users/arno.klein/Data/Mindboggle101/subjects/Colin27-1/mri/orig/001.mgz";
+        const auto outputDir = makeFreshDirectory("fastsurfer_core_conform_step_colin27_test");
+        const auto expectedCopy = fastsurfer::core::MghImage::load(fixturePath);
+        require(!expectedCopy.rawData().empty(), "The Colin27-1 MGZ fixture appears empty or could not be loaded: " + fixturePath.string());
+        require(expectedCopy.orientationCode().size() == 3 && expectedCopy.orientationCode().find('?') == std::string::npos,
+            "The Colin27-1 orientation code could not be derived from the MGZ header: '" + expectedCopy.orientationCode() + "'.");
 
         const SourceOracle sourceOracle = buildSourceOracle(expectedCopy);
         fastsurfer::core::ConformStepService service;
 
         for (const std::string &orientation : {std::string("native"), std::string("lia")}) {
-            const auto caseDir = outputDir / orientation;
-            const auto copyPath = caseDir / "copy_orig.mgz";
-            const auto conformedPath = caseDir / "conformed_orig.mgz";
+        const auto caseDir = outputDir / orientation;
+        const auto copyPath = caseDir / "copy_orig.mgz";
+        const auto conformedPath = caseDir / "conformed_orig.mgz";
 
-            fastsurfer::core::ConformStepRequest request;
-            request.inputPath = fixturePath;
-            request.copyOrigPath = copyPath;
-            request.conformedPath = conformedPath;
-            request.orientation = orientation;
+        fastsurfer::core::ConformStepRequest request;
+        request.inputPath = fixturePath;
+        request.copyOrigPath = copyPath;
+        request.conformedPath = conformedPath;
+        request.orientation = orientation;
 
-            const auto result = service.run(request);
+        const auto result = service.run(request);
 
-            require(result.success, "The conform step failed for the NIfTI fixture.");
-            require(!result.alreadyConformed,
-                    "The oblique NIfTI fixture should exercise reconforming, not the already-conformed shortcut.");
-            require(std::filesystem::exists(copyPath),
-                    "The conform step did not write the copy-orig MGZ output for the NIfTI input.");
-            require(std::filesystem::exists(conformedPath),
-                    "The conform step did not write the conformed MGZ output for the NIfTI input.");
+        require(result.success, "The conform step failed for the Colin27-1 MGZ fixture.");
+        require(std::filesystem::exists(copyPath),
+            "The conform step did not write the copy-orig MGZ output for the Colin27-1 input.");
+        require(std::filesystem::exists(conformedPath),
+            "The conform step did not write the conformed MGZ output for the Colin27-1 input.");
 
-            require(result.inputMetadata.dimensions == std::array<int, 3> {320, 320, 180},
-                    "The conform step reported unexpected input dimensions for the NIfTI fixture.");
-            require(result.inputMetadata.orientationCode == "RAS",
-                    "The conform step reported an unexpected input orientation for the NIfTI fixture.");
-            require(result.inputMetadata.dataTypeName == expectedCopy.metadata().dataTypeName,
-                    "The conform step reported an unexpected input data type for the NIfTI fixture.");
-            requireNear(result.inputMetadata.spacing[0], 0.8F, 1.0e-5F,
-                        "The conform step reported unexpected X spacing for the NIfTI fixture.");
-            requireNear(result.inputMetadata.spacing[1], 0.8F, 1.0e-5F,
-                        "The conform step reported unexpected Y spacing for the NIfTI fixture.");
-            requireNear(result.inputMetadata.spacing[2], 1.0F, 1.0e-5F,
-                        "The conform step reported unexpected Z spacing for the NIfTI fixture.");
+        require(result.inputMetadata.dimensions == expectedCopy.header().dimensions,
+            "The conform step reported unexpected input dimensions for the Colin27-1 fixture.");
+        require(result.inputMetadata.orientationCode == expectedCopy.orientationCode(),
+            "The conform step reported an unexpected input orientation for the Colin27-1 fixture.");
+        require(result.inputMetadata.dataTypeName == expectedCopy.metadata().dataTypeName,
+            "The conform step reported an unexpected input data type for the Colin27-1 fixture.");
+        requireNear(result.inputMetadata.spacing[0], expectedCopy.header().spacing[0], 1.0e-5F,
+                "The conform step reported unexpected X spacing for the Colin27-1 fixture.");
+        requireNear(result.inputMetadata.spacing[1], expectedCopy.header().spacing[1], 1.0e-5F,
+                "The conform step reported unexpected Y spacing for the Colin27-1 fixture.");
+        requireNear(result.inputMetadata.spacing[2], expectedCopy.header().spacing[2], 1.0e-5F,
+                "The conform step reported unexpected Z spacing for the Colin27-1 fixture.");
 
-            const auto copyImage = fastsurfer::core::MghImage::load(copyPath);
-            const auto conformedImage = fastsurfer::core::MghImage::load(conformedPath);
+        const auto copyImage = fastsurfer::core::MghImage::load(copyPath);
+        const auto conformedImage = fastsurfer::core::MghImage::load(conformedPath);
 
-            assertCopyOrigMatches(copyImage, expectedCopy);
+        assertCopyOrigMatches(copyImage, expectedCopy);
+        verifyOutputCase(expectedCopy, sourceOracle, request, result, conformedImage);
+        }
+    }
+
+void test_oblique_nifti_cases()
+{
+    const std::filesystem::path repoRoot = FASTSURFER_REPO_ROOT;
+    const auto fixturePath = repoRoot / "data/parrec_oblique/NIFTI/3D_T1W_trans_35_25_15_SENSE_26_1.nii";
+    const auto outputDir = makeFreshDirectory("fastsurfer_core_conform_step_nifti_test");
+    const auto expectedCopy = fastsurfer::core::NiftiConverter::loadAsMgh(fixturePath);
+    require(!expectedCopy.rawData().empty(), "The NIfTI fixture appears empty or could not be loaded: " + fixturePath.string());
+
+    require(expectedCopy.header().dimensions == std::array<int, 3> {320, 320, 180},
+            "The direct NIfTI conversion produced unexpected input dimensions for the oblique fixture.");
+    require(expectedCopy.orientationCode() == "LPS",
+            "The direct NIfTI conversion produced an unexpected input orientation for the oblique fixture.");
+    requireNear(expectedCopy.header().spacing[0], 0.8F, 1.0e-5F,
+                "The direct NIfTI conversion produced unexpected X spacing for the oblique fixture.");
+    requireNear(expectedCopy.header().spacing[1], 0.8F, 1.0e-5F,
+                "The direct NIfTI conversion produced unexpected Y spacing for the oblique fixture.");
+    requireNear(expectedCopy.header().spacing[2], 1.0F, 1.0e-5F,
+                "The direct NIfTI conversion produced unexpected Z spacing for the oblique fixture.");
+
+    const SourceOracle sourceOracle = buildSourceOracle(expectedCopy);
+    fastsurfer::core::ConformStepService service;
+
+    for (const std::string &orientation : {std::string("native"), std::string("lia")}) {
+        const auto caseDir = outputDir / orientation;
+        const auto copyPath = caseDir / "copy_orig.mgz";
+        const auto conformedPath = caseDir / "conformed_orig.mgz";
+
+        fastsurfer::core::ConformStepRequest request;
+        request.inputPath = fixturePath;
+        request.copyOrigPath = copyPath;
+        request.conformedPath = conformedPath;
+        request.orientation = orientation;
+
+        const auto result = service.run(request);
+
+        require(result.success, "The conform step failed for the NIfTI fixture.");
+        require(!result.alreadyConformed,
+                "The oblique NIfTI fixture should exercise reconforming, not the already-conformed shortcut.");
+        require(std::filesystem::exists(copyPath),
+                "The conform step did not write the copy-orig MGZ output for the NIfTI input.");
+        require(std::filesystem::exists(conformedPath),
+                "The conform step did not write the conformed MGZ output for the NIfTI input.");
+
+        require(result.inputMetadata.dimensions == std::array<int, 3> {320, 320, 180},
+                "The conform step reported unexpected input dimensions for the NIfTI fixture.");
+        require(result.inputMetadata.orientationCode == expectedCopy.orientationCode(),
+                "The conform step reported an unexpected input orientation for the NIfTI fixture.");
+        require(result.inputMetadata.dataTypeName == expectedCopy.metadata().dataTypeName,
+                "The conform step reported an unexpected input data type for the NIfTI fixture.");
+        requireNear(result.inputMetadata.spacing[0], 0.8F, 1.0e-5F,
+                    "The conform step reported unexpected X spacing for the NIfTI fixture.");
+        requireNear(result.inputMetadata.spacing[1], 0.8F, 1.0e-5F,
+                    "The conform step reported unexpected Y spacing for the NIfTI fixture.");
+        requireNear(result.inputMetadata.spacing[2], 1.0F, 1.0e-5F,
+                    "The conform step reported unexpected Z spacing for the NIfTI fixture.");
+
+        const auto copyImage = fastsurfer::core::MghImage::load(copyPath);
+        const auto conformedImage = fastsurfer::core::MghImage::load(conformedPath);
+
+        assertCopyOrigMatches(copyImage, expectedCopy);
+        if (result.alreadyConformed) {
+            verifyOutputGeometry(expectedCopy, sourceOracle, request, result, conformedImage);
+            require(expectedCopy.rawData() == conformedImage.rawData(),
+                    "The already-conformed Colin27-1 output voxel payload differs from the input fixture.");
+        } else {
             verifyOutputCase(expectedCopy, sourceOracle, request, result, conformedImage);
+        }
+    }
+}
+
+void runNamedCase(const std::string &caseName)
+{
+    if (caseName == "conformed") {
+        test_subject140_already_conformed();
+        return;
+    }
+
+    if (caseName == "oblique") {
+        test_oblique_nifti_cases();
+        return;
+    }
+
+    if (caseName == "standard") {
+        test_colin27_mgz_cases();
+        return;
+    }
+
+    throw std::runtime_error("Unknown merged conform test case: " + caseName);
+}
+
+} // namespace
+
+int main(int argc, char **argv)
+{
+    try {
+        if (argc > 1) {
+            runNamedCase(argv[1]);
+        } else {
+            test_subject140_already_conformed();
+            test_colin27_mgz_cases();
+            test_oblique_nifti_cases();
         }
 
         return 0;

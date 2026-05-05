@@ -1,4 +1,4 @@
-#include "fastsurfer/core/conform_step_service.h"
+#include "fastsurfer/core/step_conform.h"
 
 #include <algorithm>
 #include <array>
@@ -144,6 +144,25 @@ Matrix3 inverse3x3(const Matrix3 &matrix)
     }};
 }
 
+Matrix3 multiply3x3(const Matrix3 &left, const Matrix3 &right)
+{
+    Matrix3 result {{
+        {{0.0, 0.0, 0.0}},
+        {{0.0, 0.0, 0.0}},
+        {{0.0, 0.0, 0.0}},
+    }};
+
+    for (int row = 0; row < 3; ++row) {
+        for (int column = 0; column < 3; ++column) {
+            for (int k = 0; k < 3; ++k) {
+                result[row][column] += left[row][k] * right[k][column];
+            }
+        }
+    }
+
+    return result;
+}
+
 Matrix4 multiply(const Matrix4 &left, const Matrix4 &right)
 {
     Matrix4 result {{
@@ -202,6 +221,13 @@ Matrix4 inverseAffine(const Matrix4 &matrix)
 bool isClose(const double left, const double right, const double epsilon)
 {
     return std::fabs(left - right) <= epsilon;
+}
+
+bool hasIntegerTranslation(const Matrix4 &vox2vox, const double epsilon)
+{
+    return isClose(vox2vox[0][3], std::round(vox2vox[0][3]), epsilon) &&
+           isClose(vox2vox[1][3], std::round(vox2vox[1][3]), epsilon) &&
+           isClose(vox2vox[2][3], std::round(vox2vox[2][3]), epsilon);
 }
 
 bool allCloseIdentity(const Matrix4 &matrix, const double epsilon)
@@ -268,6 +294,108 @@ std::array<float, 9> directionCosinesForOrientation(const std::string &orientati
     return directionCosines;
 }
 
+std::array<int, 3> targetDimensionsForOrientation(
+    const std::array<int, 3> &nativeTargetDimensions,
+    const std::string &sourceOrientation,
+    const std::string &requestedOrientation)
+{
+    const auto normalizedTarget = normalizeUpper(requestedOrientation);
+    if (normalizedTarget == normalizeUpper(sourceOrientation)) {
+        return nativeTargetDimensions;
+    }
+
+    std::array<int, 3> targetDimensions {};
+    for (int targetAxis = 0; targetAxis < 3; ++targetAxis) {
+        const int targetGroup = axisGroup(normalizedTarget[targetAxis]);
+        for (int sourceAxis = 0; sourceAxis < 3; ++sourceAxis) {
+            if (axisGroup(sourceOrientation[sourceAxis]) != targetGroup) {
+                continue;
+            }
+
+            targetDimensions[targetAxis] = nativeTargetDimensions[sourceAxis];
+            break;
+        }
+    }
+
+    return targetDimensions;
+}
+
+Matrix3 linearPart(const Matrix4 &affine)
+{
+    Matrix3 linear {{
+        {{0.0, 0.0, 0.0}},
+        {{0.0, 0.0, 0.0}},
+        {{0.0, 0.0, 0.0}},
+    }};
+
+    for (int row = 0; row < 3; ++row) {
+        for (int column = 0; column < 3; ++column) {
+            linear[row][column] = affine[row][column];
+        }
+    }
+
+    return linear;
+}
+
+Matrix3 scaledDirectionMatrix(const std::array<float, 9> &directionCosines, const std::array<float, 3> &spacing)
+{
+    Matrix3 linear {{
+        {{0.0, 0.0, 0.0}},
+        {{0.0, 0.0, 0.0}},
+        {{0.0, 0.0, 0.0}},
+    }};
+
+    for (int column = 0; column < 3; ++column) {
+        for (int row = 0; row < 3; ++row) {
+            linear[row][column] = static_cast<double>(directionCosines[column * 3 + row]) *
+                                  static_cast<double>(spacing[column]);
+        }
+    }
+
+    return linear;
+}
+
+Vector3 translationToFixCenter(
+    const Matrix3 &vox2voxLinear,
+    const std::array<int, 3> &sourceDimensions,
+    const std::array<int, 3> &targetDimensions)
+{
+    const Vector3 sourceCenter {
+        (static_cast<double>(sourceDimensions[0]) - 1.0) / 2.0,
+        (static_cast<double>(sourceDimensions[1]) - 1.0) / 2.0,
+        (static_cast<double>(sourceDimensions[2]) - 1.0) / 2.0,
+    };
+    const Vector3 targetCenter {
+        (static_cast<double>(targetDimensions[0]) - 1.0) / 2.0,
+        (static_cast<double>(targetDimensions[1]) - 1.0) / 2.0,
+        (static_cast<double>(targetDimensions[2]) - 1.0) / 2.0,
+    };
+
+    Vector3 translation {};
+    for (int row = 0; row < 3; ++row) {
+        translation[row] = sourceCenter[row];
+        for (int column = 0; column < 3; ++column) {
+            translation[row] -= vox2voxLinear[row][column] * targetCenter[column];
+        }
+    }
+
+    return translation;
+}
+
+std::array<float, 3> headerCenterFromAffine(const Matrix4 &affine, const std::array<int, 3> &dimensions)
+{
+    std::array<float, 3> center {};
+    for (int row = 0; row < 3; ++row) {
+        double value = affine[row][3];
+        for (int column = 0; column < 3; ++column) {
+            value += affine[row][column] * (static_cast<double>(dimensions[column]) / 2.0);
+        }
+        center[row] = static_cast<float>(value);
+    }
+
+    return center;
+}
+
 std::array<int, 3> computeTargetImageSize(const MghImage &image, const float targetVoxelSize, const std::string &imageSizeMode)
 {
     if (imageSizeMode == "auto") {
@@ -318,64 +446,36 @@ MghImage::Header buildTargetHeader(
 {
     const std::string sourceOrientation = image.orientationCode();
     const std::string orientation = requestedOrientation == "native" ? sourceOrientation : normalizeUpper(requestedOrientation);
-    const OrientationTransform transform = requestedOrientation == "native"
-        ? OrientationTransform {}
-        : computeOrientationTransform(sourceOrientation, orientation);
+    const std::array<int, 3> targetDimensions = requestedOrientation == "native"
+        ? nativeTargetDimensions
+        : targetDimensionsForOrientation(nativeTargetDimensions, sourceOrientation, orientation);
 
     MghImage::Header header = image.header();
     header.frames = 1;
     header.type = static_cast<std::int32_t>(MghDataType::UChar);
     header.rasGoodFlag = 1;
     header.spacing = {targetVoxelSize, targetVoxelSize, targetVoxelSize};
-    for (int axis = 0; axis < 3; ++axis) {
-        header.dimensions[axis] = nativeTargetDimensions[transform.axes[axis]];
-    }
+    header.dimensions = targetDimensions;
     header.directionCosines = requestedOrientation == "native"
         ? image.header().directionCosines
         : directionCosinesForOrientation(orientation);
 
     const Matrix4 sourceAffine = image.affine();
-    const Vector4 sourceCenterInput {
-        static_cast<double>(image.header().dimensions[0]) / 2.0,
-        static_cast<double>(image.header().dimensions[1]) / 2.0,
-        static_cast<double>(image.header().dimensions[2]) / 2.0,
-        1.0,
-    };
-    const Vector4 sourceCenter = multiply(sourceAffine, sourceCenterInput);
-    header.center = {
-        static_cast<float>(sourceCenter[0]),
-        static_cast<float>(sourceCenter[1]),
-        static_cast<float>(sourceCenter[2]),
-    };
+    const Matrix3 sourceLinear = linearPart(sourceAffine);
+    const Matrix3 targetLinear = scaledDirectionMatrix(header.directionCosines, header.spacing);
+    const Matrix3 vox2voxLinear = multiply3x3(inverse3x3(sourceLinear), targetLinear);
+    const Vector3 vox2voxTranslation =
+        translationToFixCenter(vox2voxLinear, image.header().dimensions, header.dimensions);
 
-    Matrix4 targetAffine = affineFromHeader(header);
-    const Matrix4 vox2vox = multiply(inverseAffine(targetAffine), sourceAffine);
-    if (!rotationRequiresInterpolation(vox2vox)) {
-        const Matrix4 invVox2Vox = inverseAffine(vox2vox);
-        const bool allHalfInteger =
-            isClose(invVox2Vox[0][3] * 2.0, std::round(invVox2Vox[0][3] * 2.0), 1.0e-4) &&
-            isClose(invVox2Vox[1][3] * 2.0, std::round(invVox2Vox[1][3] * 2.0), 1.0e-4) &&
-            isClose(invVox2Vox[2][3] * 2.0, std::round(invVox2Vox[2][3] * 2.0), 1.0e-4);
-        const bool allInteger =
-            isClose(invVox2Vox[0][3], std::round(invVox2Vox[0][3]), 1.0e-4) &&
-            isClose(invVox2Vox[1][3], std::round(invVox2Vox[1][3]), 1.0e-4) &&
-            isClose(invVox2Vox[2][3], std::round(invVox2Vox[2][3]), 1.0e-4);
+    Matrix4 vox2vox {{
+        {{vox2voxLinear[0][0], vox2voxLinear[0][1], vox2voxLinear[0][2], vox2voxTranslation[0]}},
+        {{vox2voxLinear[1][0], vox2voxLinear[1][1], vox2voxLinear[1][2], vox2voxTranslation[1]}},
+        {{vox2voxLinear[2][0], vox2voxLinear[2][1], vox2voxLinear[2][2], vox2voxTranslation[2]}},
+        {{0.0, 0.0, 0.0, 1.0}},
+    }};
 
-        if (!allInteger && allHalfInteger) {
-            const Vector4 adjustedCenterInput {
-                static_cast<double>(image.header().dimensions[0]) / 2.0 + (isClose(invVox2Vox[0][3], std::round(invVox2Vox[0][3]), 1.0e-4) ? 0.0 : 0.5),
-                static_cast<double>(image.header().dimensions[1]) / 2.0 + (isClose(invVox2Vox[1][3], std::round(invVox2Vox[1][3]), 1.0e-4) ? 0.0 : 0.5),
-                static_cast<double>(image.header().dimensions[2]) / 2.0 + (isClose(invVox2Vox[2][3], std::round(invVox2Vox[2][3]), 1.0e-4) ? 0.0 : 0.5),
-                1.0,
-            };
-            const Vector4 adjustedCenter = multiply(sourceAffine, adjustedCenterInput);
-            header.center = {
-                static_cast<float>(adjustedCenter[0]),
-                static_cast<float>(adjustedCenter[1]),
-                static_cast<float>(adjustedCenter[2]),
-            };
-        }
-    }
+    const Matrix4 targetAffine = multiply(sourceAffine, vox2vox);
+    header.center = headerCenterFromAffine(targetAffine, header.dimensions);
 
     return header;
 }
@@ -459,6 +559,7 @@ float sampleLinearLikeScipy(
     const std::array<int, 3> &dimensions,
     const itk::ContinuousIndex<double, 3> &continuousIndex)
 {
+    constexpr double boundaryEpsilon = 1.0e-5;
     std::array<int, 3> lower {};
     std::array<int, 3> upper {};
     std::array<double, 3> weightUpper {};
@@ -466,13 +567,15 @@ float sampleLinearLikeScipy(
 
     for (int axis = 0; axis < 3; ++axis) {
         const double maxIndex = static_cast<double>(dimensions[axis] - 1);
-        if (continuousIndex[axis] < 0.0 || continuousIndex[axis] > maxIndex) {
+        double clampedIndex = continuousIndex[axis];
+        if (clampedIndex < -boundaryEpsilon || clampedIndex > maxIndex + boundaryEpsilon) {
             return 0.0F;
         }
+        clampedIndex = std::clamp(clampedIndex, 0.0, maxIndex);
 
-        lower[axis] = static_cast<int>(std::floor(continuousIndex[axis]));
+        lower[axis] = static_cast<int>(std::floor(clampedIndex));
         upper[axis] = lower[axis] + 1;
-        weightUpper[axis] = continuousIndex[axis] - static_cast<double>(lower[axis]);
+        weightUpper[axis] = clampedIndex - static_cast<double>(lower[axis]);
         weightLower[axis] = 1.0 - weightUpper[axis];
 
         if (upper[axis] >= dimensions[axis]) {
@@ -526,6 +629,51 @@ std::vector<float> mapImageWithItk(
 
                 mappedData[flattenIndex(targetHeader.dimensions, x, y, z)] =
                     sampleLinearLikeScipy(sourceData, image.header().dimensions, inputContinuousIndex);
+            }
+        }
+    }
+
+    return mappedData;
+}
+
+std::vector<float> mapImageWithoutInterpolation(
+    const std::vector<float> &sourceData,
+    const std::array<int, 3> &sourceDimensions,
+    const std::array<int, 3> &targetDimensions,
+    const Matrix4 &targetToSource)
+{
+    const std::size_t voxelCount = static_cast<std::size_t>(targetDimensions[0]) *
+                                   static_cast<std::size_t>(targetDimensions[1]) *
+                                   static_cast<std::size_t>(targetDimensions[2]);
+    std::vector<float> mappedData(voxelCount, 0.0F);
+
+    for (int z = 0; z < targetDimensions[2]; ++z) {
+        for (int y = 0; y < targetDimensions[1]; ++y) {
+            for (int x = 0; x < targetDimensions[0]; ++x) {
+                const int sourceX = static_cast<int>(std::lround(
+                    targetToSource[0][0] * static_cast<double>(x) +
+                    targetToSource[0][1] * static_cast<double>(y) +
+                    targetToSource[0][2] * static_cast<double>(z) +
+                    targetToSource[0][3]));
+                const int sourceY = static_cast<int>(std::lround(
+                    targetToSource[1][0] * static_cast<double>(x) +
+                    targetToSource[1][1] * static_cast<double>(y) +
+                    targetToSource[1][2] * static_cast<double>(z) +
+                    targetToSource[1][3]));
+                const int sourceZ = static_cast<int>(std::lround(
+                    targetToSource[2][0] * static_cast<double>(x) +
+                    targetToSource[2][1] * static_cast<double>(y) +
+                    targetToSource[2][2] * static_cast<double>(z) +
+                    targetToSource[2][3]));
+
+                if (sourceX < 0 || sourceX >= sourceDimensions[0] ||
+                    sourceY < 0 || sourceY >= sourceDimensions[1] ||
+                    sourceZ < 0 || sourceZ >= sourceDimensions[2]) {
+                    continue;
+                }
+
+                mappedData[flattenIndex(targetDimensions, x, y, z)] =
+                    sourceData[flattenIndex(sourceDimensions, sourceX, sourceY, sourceZ)];
             }
         }
     }
@@ -671,8 +819,13 @@ ConformStepResult ConformStepService::run(const ConformStepRequest &request) con
     const float targetVoxelSize = computeTargetVoxelSize(image, request);
     const auto nativeTargetDimensions = computeTargetImageSize(image, targetVoxelSize, request.imageSizeMode);
     const MghImage::Header targetHeader = buildTargetHeader(image, targetVoxelSize, nativeTargetDimensions, request.orientation);
+    const Matrix4 targetAffine = affineFromHeader(targetHeader);
+    const Matrix4 targetToSource = multiply(inverseAffine(image.affine()), targetAffine);
     std::vector<float> sourceData = image.voxelDataAsFloat();
-    std::vector<float> mappedData = mapImageWithItk(image, sourceData, targetHeader);
+    std::vector<float> mappedData =
+        !rotationRequiresInterpolation(targetToSource) && hasIntegerTranslation(targetToSource, 1.0e-4)
+            ? mapImageWithoutInterpolation(sourceData, image.header().dimensions, targetHeader.dimensions, targetToSource)
+            : mapImageWithItk(image, sourceData, targetHeader);
 
     const auto [srcMin, scale] = getScale(sourceData, 0.0F, 255.0F);
     mappedData = scaleAndCrop(mappedData, 0.0F, 255.0F, srcMin, scale);

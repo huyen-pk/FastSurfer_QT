@@ -19,6 +19,8 @@ namespace {
 
 using RasTransform3 = std::array<std::array<double, 3>, 3>;
 
+constexpr std::array<double, 3> kLpsToRasSign {-1.0, -1.0, 1.0};
+
 std::string normalizeLower(std::string value)
 {
     std::transform(value.begin(), value.end(), value.begin(), [](unsigned char character) {
@@ -90,7 +92,8 @@ MghImage::Header buildHeaderFromImage(const typename TImage::Pointer &image, con
     }};
     for (int column = 0; column < 3; ++column) {
         for (int row = 0; row < 3; ++row) {
-            header.directionCosines[column * 3 + row] = static_cast<float>(lpsDirection[row][column]);
+            header.directionCosines[column * 3 + row] =
+                static_cast<float>(kLpsToRasSign[row] * lpsDirection[row][column]);
         }
     }
 
@@ -102,9 +105,9 @@ MghImage::Header buildHeaderFromImage(const typename TImage::Pointer &image, con
     typename TImage::PointType centerPointLps;
     image->TransformContinuousIndexToPhysicalPoint(centerIndex, centerPointLps);
     header.center = {
-        static_cast<float>(centerPointLps[0]),
-        static_cast<float>(centerPointLps[1]),
-        static_cast<float>(centerPointLps[2]),
+        static_cast<float>(kLpsToRasSign[0] * centerPointLps[0]),
+        static_cast<float>(kLpsToRasSign[1] * centerPointLps[1]),
+        static_cast<float>(kLpsToRasSign[2] * centerPointLps[2]),
     };
     return header;
 }

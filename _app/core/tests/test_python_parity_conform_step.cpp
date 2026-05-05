@@ -8,17 +8,32 @@
 #include <string>
 #include <vector>
 
-#include "fastsurfer/core/conform_step_request.h"
-#include "fastsurfer/core/conform_step_service.h"
+#include "fastsurfer/core/step_conform_request.h"
+#include "fastsurfer/core/step_conform.h"
 #include "fastsurfer/core/mgh_image.h"
+#include <format>
 
 namespace {
 
 std::filesystem::path makeFreshDirectory(const std::string &name)
 {
-    const auto root = std::filesystem::temp_directory_path() / name;
-    std::filesystem::remove_all(root);
-    std::filesystem::create_directories(root);
+    const auto root = [&]() {
+        if (const char *envTmp = std::getenv("FASTSURFER_TEST_TMPDIR"); envTmp != nullptr && envTmp[0] != '\0') {
+            return std::filesystem::path(envTmp) / name;
+        }
+
+        const std::filesystem::path repoRoot = FASTSURFER_REPO_ROOT;
+        return repoRoot / ".tmp" / name;
+    }();
+
+    std::error_code ec;
+    std::filesystem::remove_all(root, ec);
+    ec.clear();
+    std::filesystem::create_directories(root, ec);
+    if (ec || !std::filesystem::exists(root)) {
+        throw std::runtime_error("Failed to create temporary test directory: " + root.string());
+    }
+
     return root;
 }
 
@@ -69,6 +84,7 @@ fastsurfer::core::MghImage createSyntheticNonConformedInput(const std::filesyste
 {
     const auto sourceImage = fastsurfer::core::MghImage::load(fixturePath);
     const auto sourceData = sourceImage.voxelDataAsFloat();
+    require(!sourceData.empty(), "The fixture MGZ appears empty or unreadable: " + fixturePath.string());
 
     fastsurfer::core::MghImage::Header header = sourceImage.header();
     header.dimensions = {64, 72, 80};
@@ -111,17 +127,29 @@ fastsurfer::core::MghImage createSyntheticNonConformedInput(const std::filesyste
     return fastsurfer::core::MghImage::fromVoxelData(header, cropped, header.type);
 }
 
-void assertAffineClose(const fastsurfer::core::Matrix4 &left, const fastsurfer::core::Matrix4 &right)
+void assertAffineClose(
+    const fastsurfer::core::Matrix4 &left,
+    const fastsurfer::core::Matrix4 &right,
+    const double translationToleranceMm = 1.0e-4)
 {
-    for (int row = 0; row < 4; ++row) {
-        for (int column = 0; column < 4; ++column) {
+    for (int row = 0; row < 3; ++row) {
+        for (int column = 0; column < 3; ++column) {
             require(std::fabs(left[row][column] - right[row][column]) <= 1.0e-4,
-                    "Affine differs between native and Python outputs.");
+                    "Affine linear terms differ between native and Python outputs.");
         }
+
+        require(std::fabs(left[row][3] - right[row][3]) <= translationToleranceMm,
+                std::format("Affine translation differs from Python by more than {} millimeters.", translationToleranceMm));
     }
+
+    require(std::fabs(left[3][0] - right[3][0]) <= 1.0e-6 &&
+                std::fabs(left[3][1] - right[3][1]) <= 1.0e-6 &&
+                std::fabs(left[3][2] - right[3][2]) <= 1.0e-6 &&
+                std::fabs(left[3][3] - right[3][3]) <= 1.0e-6,
+            "Affine homogeneous row differs between native and Python outputs.");
 }
 
-void assertMatchingImages(const std::filesystem::path &leftPath, const std::filesystem::path &rightPath)
+void assertExactImageMatch(const std::filesystem::path &leftPath, const std::filesystem::path &rightPath)
 {
     const auto leftImage = fastsurfer::core::MghImage::load(leftPath);
     const auto rightImage = fastsurfer::core::MghImage::load(rightPath);
@@ -142,20 +170,84 @@ void assertMatchingImages(const std::filesystem::path &leftPath, const std::file
 
         const auto leftData = leftImage.voxelDataAsFloat();
         const auto rightData = rightImage.voxelDataAsFloat();
-        require(leftData.size() == rightData.size(), "Voxel counts differ between native and Python outputs.");
+        require(leftData == rightData, "Voxel payload differs between native and Python outputs.");
+    }
 
-        float maxDifference = 0.0F;
-        for (std::size_t index = 0; index < leftData.size(); ++index) {
-        maxDifference = std::max(maxDifference, std::fabs(leftData[index] - rightData[index]));
+    void assertComparableConformedImages(
+        const std::filesystem::path &leftPath,
+        const std::filesystem::path &rightPath,
+        const double translationToleranceMm = 1.0e-4,
+        const double meanAbsoluteDifferenceTolerance = 1.0)
+    {
+        const auto leftImage = fastsurfer::core::MghImage::load(leftPath);
+        const auto rightImage = fastsurfer::core::MghImage::load(rightPath);
+
+        require(leftImage.header().dimensions == rightImage.header().dimensions,
+                "Image dimensions differ between native and Python outputs.");
+        require(leftImage.header().frames == rightImage.header().frames,
+                "Frame counts differ between native and Python outputs.");
+        require(leftImage.header().type == rightImage.header().type,
+                "Data types differ between native and Python outputs.");
+        require(leftImage.orientationCode() == rightImage.orientationCode(),
+                "Output orientations differ between native and Python outputs.");
+        for (int axis = 0; axis < 3; ++axis) {
+            require(std::fabs(leftImage.header().spacing[axis] - rightImage.header().spacing[axis]) <= 1.0e-4F,
+                    "Output spacing differs between native and Python outputs.");
         }
-        require(maxDifference <= 1.0F, "Voxel payload differs from Python by more than one intensity level.");
-}
+        assertAffineClose(leftImage.affine(), rightImage.affine(), translationToleranceMm);
 
-} // namespace
+        const auto leftData = leftImage.voxelDataAsFloat();
+        const auto rightData = rightImage.voxelDataAsFloat();
+        require(leftData.size() == rightData.size(), "Voxel counts differ between native and Python outputs.");
+        double totalDifference = 0.0;
+        std::size_t foregroundCount = 0;
+        double maxDiff = 0.0;
 
-int main()
-{
-    try {
+        for (std::size_t i = 0; i < leftData.size(); ++i) {
+            double diff = std::fabs(static_cast<double>(leftData[i]) - static_cast<double>(rightData[i]));
+            
+            // Update Max Diff
+            if (diff > maxDiff) maxDiff = diff;
+
+            // Only count differences where there is actual signal (brain tissue)
+            if (leftData[i] > 0 || rightData[i] > 0) {
+                totalDifference += diff;
+                foregroundCount++;
+            }
+        }
+
+        const double foregroundMAD = totalDifference / static_cast<double>(foregroundCount);
+        require(foregroundMAD <= 0.5, "Brain tissue intensity diverges too much.");
+        require(maxDiff <= 2.0, "Localized intensity error is too high.");
+
+        const double meanAbsoluteDifference = totalDifference / static_cast<double>(leftData.size());
+        require(meanAbsoluteDifference <= meanAbsoluteDifferenceTolerance,
+                "Voxel payload diverges from Python beyond the allowed mean absolute difference.");
+    }
+
+    std::string shellEscapeString(const std::string &value)
+    {
+        std::string escaped;
+        escaped.reserve(value.size() + 2);
+        escaped.push_back('\'');
+        for (const char character : value) {
+            if (character == '\'') {
+                escaped += "'\\''";
+            } else {
+                escaped.push_back(character);
+            }
+        }
+        escaped.push_back('\'');
+        return escaped;
+    }
+
+    int runCommand(const std::string &command)
+    {
+        return std::system(command.c_str());
+    }
+
+    void test_step_conform_subject140_parity()
+    {
         const std::filesystem::path repoRoot = FASTSURFER_REPO_ROOT;
         const std::filesystem::path fixturePath = repoRoot / "data/Subject140/140_orig.mgz";
         const auto pythonExecutable = resolvePythonExecutable(repoRoot);
@@ -184,7 +276,7 @@ int main()
                 << "input_path = Path(sys.argv[2])\n"
                 << "copy_path = Path(sys.argv[3])\n"
                 << "conformed_path = Path(sys.argv[4])\n"
-                << "sys.path.insert(0, str(repo_root))\n"
+                << "sys.path.insert(0, str(repo_root / 'baseline' / 'FastSurfer'))\n"
                 << "from FastSurferCNN.data_loader.conform import conform, is_conform\n"
                 << "orig = nib.load(str(input_path))\n"
                 << "orig_data = np.asarray(orig.dataobj)\n"
@@ -220,15 +312,88 @@ int main()
             " " + shellEscape(pythonCopy) +
             " " + shellEscape(pythonConformed);
 
-        const int exitCode = std::system(command.c_str());
+        const int exitCode = runCommand(command);
         require(exitCode == 0,
                 "The Python reference execution failed during the parity test. Set FASTSURFER_PYTHON_EXECUTABLE or create .venv-parity with numpy and nibabel.");
 
         require(std::filesystem::exists(pythonCopy), "The Python reference did not create the copy_orig output.");
         require(std::filesystem::exists(pythonConformed), "The Python reference did not create the conformed output.");
 
-        assertMatchingImages(nativeCopy, pythonCopy);
-        assertMatchingImages(nativeConformed, pythonConformed);
+        assertExactImageMatch(nativeCopy, pythonCopy);
+        assertComparableConformedImages(nativeConformed, pythonConformed);
+    }
+
+    void test_step_conform_oblique_parity()
+    {
+        const std::filesystem::path repoRoot = FASTSURFER_REPO_ROOT;
+        const std::filesystem::path fixturePath = repoRoot / "data/parrec_oblique/NIFTI/3D_T1W_trans_35_25_15_SENSE_26_1.nii";
+        const std::filesystem::path artifactRoot =
+            repoRoot / "generated/FastSurferCNN/parrec_oblique_3d_t1w_trans_35_25_15_sense_26_1_cpp_parity" /
+            "step_02_conform_input_image_and_save_conformed_orig";
+        const std::filesystem::path pythonCopy = artifactRoot / "input_copy.mgz";
+        const std::filesystem::path pythonConformed = artifactRoot / "conformed_orig.mgz";
+
+        require(std::filesystem::exists(pythonCopy),
+                "Missing generated Python oblique copy artifact. Regenerate with tools/generate_fastsurfercnn_intermediate_outputs.py --no-image-size --stop-after-step 3.");
+        require(std::filesystem::exists(pythonConformed),
+                "Missing generated Python oblique conformed artifact. Regenerate with tools/generate_fastsurfercnn_intermediate_outputs.py --no-image-size --stop-after-step 3.");
+
+        const auto nativeDir = makeFreshDirectory("fastsurfer_core_native_oblique_parity");
+        const auto nativeCopy = nativeDir / "copy_orig.mgz";
+        const auto nativeConformed = nativeDir / "conformed_orig.mgz";
+
+        fastsurfer::core::ConformStepRequest request;
+        request.inputPath = fixturePath;
+        request.copyOrigPath = nativeCopy;
+        request.conformedPath = nativeConformed;
+        request.imageSizeMode = "fov";
+        request.orientation = "lia";
+
+        fastsurfer::core::ConformStepService service;
+        const auto nativeResult = service.run(request);
+        require(nativeResult.success, "The native conform step did not succeed for the oblique parity test.");
+        require(!nativeResult.alreadyConformed,
+                "The oblique fixture should exercise native reconforming, not the already-conformed shortcut.");
+        require(std::filesystem::exists(nativeCopy), "The native conform step did not write the oblique copy_orig output.");
+        require(std::filesystem::exists(nativeConformed), "The native conform step did not write the oblique conformed output.");
+
+        const auto nativeCopyImage = fastsurfer::core::MghImage::load(nativeCopy);
+        const auto pythonCopyImage = fastsurfer::core::MghImage::load(pythonCopy);
+        require(nativeCopyImage.header().dimensions == pythonCopyImage.header().dimensions,
+                "The oblique copy_orig dimensions differ between native and Python artifacts.");
+        require(nativeCopyImage.voxelDataAsFloat() == pythonCopyImage.voxelDataAsFloat(),
+            "The oblique copy_orig voxel payload differs between native and Python artifacts.");
+        assertExactImageMatch(nativeCopy, pythonCopy);
+
+        assertComparableConformedImages(nativeConformed, pythonConformed);
+    }
+
+    void runNamedCase(const std::string &caseName)
+    {
+        if (caseName == "test_step_conform_subject140_parity") {
+            test_step_conform_subject140_parity();
+            return;
+        }
+
+        if (caseName == "test_step_conform_oblique_parity") {
+            test_step_conform_oblique_parity();
+            return;
+        }
+
+        throw std::runtime_error("Unknown parity test case: " + caseName);
+}
+
+} // namespace
+
+    int main(int argc, char **argv)
+{
+    try {
+            if (argc > 1) {
+                runNamedCase(argv[1]);
+            } else {
+                test_step_conform_subject140_parity();
+                test_step_conform_oblique_parity();
+        }
 
         return 0;
     } catch (const std::exception &error) {

@@ -1,20 +1,25 @@
-set(FASTSURFER_REPO_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../..")
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+get_filename_component(FASTSURFER_REPO_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../.." ABSOLUTE)
 
-add_executable(test_conform_step_service
-    test_conform_step_service.cpp
+add_executable(test_step_conform
+    test_step_conform.cpp
 )
 
-target_link_libraries(test_conform_step_service
+target_link_libraries(test_step_conform
     PRIVATE
         fastsurfer_core
+    Eigen3::Eigen
 )
 
-target_compile_definitions(test_conform_step_service
+target_compile_definitions(test_step_conform
     PRIVATE
         FASTSURFER_REPO_ROOT="${FASTSURFER_REPO_ROOT}"
 )
 
-add_test(NAME run_conform_step_should_write_copy_and_conformed_outputs COMMAND test_conform_step_service)
+add_test(NAME run_conformed_step_on_already_conformed_scan_produce_conformed_output COMMAND test_step_conform conformed)
+
+add_test(NAME run_conform_step_on_standard_scan_should_produce_conformed_output COMMAND test_step_conform standard)
 
 add_executable(test_native_reconform_non_conformed
     test_native_reconform_non_conformed.cpp
@@ -46,7 +51,9 @@ target_compile_definitions(test_python_parity_conform_step
         FASTSURFER_REPO_ROOT="${FASTSURFER_REPO_ROOT}"
 )
 
-add_test(NAME run_conform_step_should_match_python_reference_on_mgz_fixture COMMAND test_python_parity_conform_step)
+add_test(NAME run_conform_step_should_match_python_reference_on_mgz_fixture COMMAND test_python_parity_conform_step test_step_conform_subject140_parity)
+
+add_test(NAME test_step_conform_oblique_parity COMMAND test_python_parity_conform_step test_step_conform_oblique_parity)
 
 add_executable(test_nifti_converter
     test_nifti_converter.cpp
@@ -64,35 +71,20 @@ target_compile_definitions(test_nifti_converter
 
 add_test(NAME convert_nifti_to_mgz_should_preserve_expected_geometry_and_voxels COMMAND test_nifti_converter)
 
-add_executable(test_nifti_roundtrip
-    test_nifti_roundtrip.cpp
+add_executable(test_nifti_converter_roundtrip
+    test_nifti_converter_roundtrip.cpp
 )
 
-target_link_libraries(test_nifti_roundtrip
+target_link_libraries(test_nifti_converter_roundtrip
     PRIVATE
         fastsurfer_core
 )
 
-target_compile_definitions(test_nifti_roundtrip
+target_compile_definitions(test_nifti_converter_roundtrip
     PRIVATE
         FASTSURFER_REPO_ROOT="${FASTSURFER_REPO_ROOT}"
 )
 
-add_test(NAME convert_nifti_to_mgz_and_back_to_nifti_should_roundtrip_fixture_geometry_and_voxels COMMAND test_nifti_roundtrip)
+add_test(NAME convert_nifti_to_mgz_and_back_should_produce_original_image COMMAND test_nifti_converter_roundtrip)
 
-add_executable(test_conform_step_service_nifti
-    test_conform_step_service_nifti.cpp
-)
-
-target_link_libraries(test_conform_step_service_nifti
-    PRIVATE
-        fastsurfer_core
-    Eigen3::Eigen
-)
-
-target_compile_definitions(test_conform_step_service_nifti
-    PRIVATE
-        FASTSURFER_REPO_ROOT="${FASTSURFER_REPO_ROOT}"
-)
-
-add_test(NAME run_conform_step_on_nifti_input_should_write_copy_and_conformed_outputs COMMAND test_conform_step_service_nifti)
+add_test(NAME run_conform_step_on_oblique_scan_should_produce_conformed_output COMMAND test_step_conform oblique)
