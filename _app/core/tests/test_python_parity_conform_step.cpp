@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 
+#include "TestConstants.h"
 #include "fastsurfer/core/step_conform_request.h"
 #include "fastsurfer/core/step_conform.h"
 #include "fastsurfer/core/mgh_image.h"
@@ -130,11 +131,11 @@ fastsurfer::core::MghImage createSyntheticNonConformedInput(const std::filesyste
 void assertAffineClose(
     const fastsurfer::core::Matrix4 &left,
     const fastsurfer::core::Matrix4 &right,
-    const double translationToleranceMm = 1.0e-4)
+    const double translationToleranceMm = test_constants::AFFINE_TRANSLATION_TOLERANCE_MM)
 {
     for (int row = 0; row < 3; ++row) {
         for (int column = 0; column < 3; ++column) {
-            require(std::fabs(left[row][column] - right[row][column]) <= 1.0e-4,
+                require(std::fabs(left[row][column] - right[row][column]) <= test_constants::AFFINE_LINEAR_TOLERANCE,
                     "Affine linear terms differ between native and Python outputs.");
         }
 
@@ -142,10 +143,10 @@ void assertAffineClose(
                 std::format("Affine translation differs from Python by more than {} millimeters.", translationToleranceMm));
     }
 
-    require(std::fabs(left[3][0] - right[3][0]) <= 1.0e-6 &&
-                std::fabs(left[3][1] - right[3][1]) <= 1.0e-6 &&
-                std::fabs(left[3][2] - right[3][2]) <= 1.0e-6 &&
-                std::fabs(left[3][3] - right[3][3]) <= 1.0e-6,
+    require(std::fabs(left[3][0] - right[3][0]) <= test_constants::HOMOGENEOUS_ROW_TOLERANCE &&
+                std::fabs(left[3][1] - right[3][1]) <= test_constants::HOMOGENEOUS_ROW_TOLERANCE &&
+                std::fabs(left[3][2] - right[3][2]) <= test_constants::HOMOGENEOUS_ROW_TOLERANCE &&
+                std::fabs(left[3][3] - right[3][3]) <= test_constants::HOMOGENEOUS_ROW_TOLERANCE,
             "Affine homogeneous row differs between native and Python outputs.");
 }
 
@@ -160,25 +161,24 @@ void assertExactImageMatch(const std::filesystem::path &leftPath, const std::fil
             "Frame counts differ between native and Python outputs.");
     require(leftImage.header().type == rightImage.header().type,
             "Data types differ between native and Python outputs.");
-        require(leftImage.orientationCode() == rightImage.orientationCode(),
+    require(leftImage.orientationCode() == rightImage.orientationCode(),
             "Output orientations differ between native and Python outputs.");
-        for (int axis = 0; axis < 3; ++axis) {
-        require(std::fabs(leftImage.header().spacing[axis] - rightImage.header().spacing[axis]) <= 1.0e-4F,
-            "Output spacing differs between native and Python outputs.");
-        }
-        assertAffineClose(leftImage.affine(), rightImage.affine());
-
-        const auto leftData = leftImage.voxelDataAsFloat();
-        const auto rightData = rightImage.voxelDataAsFloat();
-        require(leftData == rightData, "Voxel payload differs between native and Python outputs.");
+    for (int axis = 0; axis < 3; ++axis) {
+        require(std::fabs(leftImage.header().spacing[axis] - rightImage.header().spacing[axis]) <= test_constants::PARITY_SPACING_TOLERANCE,
+                "Output spacing differs between native and Python outputs.");
     }
+    assertAffineClose(leftImage.affine(), rightImage.affine());
 
-    void assertComparableConformedImages(
-        const std::filesystem::path &leftPath,
-        const std::filesystem::path &rightPath,
-        const double translationToleranceMm = 1.0e-4,
-        const double meanAbsoluteDifferenceTolerance = 1.0)
-    {
+    const auto leftData = leftImage.voxelDataAsFloat();
+    const auto rightData = rightImage.voxelDataAsFloat();
+    require(leftData == rightData, "Voxel payload differs between native and Python outputs.");
+}
+
+void assertComparableConformedImages(
+    const std::filesystem::path &leftPath,
+    const std::filesystem::path &rightPath,
+    const double translationToleranceMm = test_constants::AFFINE_TRANSLATION_TOLERANCE_MM)
+{
         const auto leftImage = fastsurfer::core::MghImage::load(leftPath);
         const auto rightImage = fastsurfer::core::MghImage::load(rightPath);
 
@@ -191,7 +191,7 @@ void assertExactImageMatch(const std::filesystem::path &leftPath, const std::fil
         require(leftImage.orientationCode() == rightImage.orientationCode(),
                 "Output orientations differ between native and Python outputs.");
         for (int axis = 0; axis < 3; ++axis) {
-            require(std::fabs(leftImage.header().spacing[axis] - rightImage.header().spacing[axis]) <= 1.0e-4F,
+                require(std::fabs(leftImage.header().spacing[axis] - rightImage.header().spacing[axis]) <= test_constants::PARITY_SPACING_TOLERANCE,
                     "Output spacing differs between native and Python outputs.");
         }
         assertAffineClose(leftImage.affine(), rightImage.affine(), translationToleranceMm);
@@ -217,12 +217,9 @@ void assertExactImageMatch(const std::filesystem::path &leftPath, const std::fil
         }
 
         const double foregroundMAD = totalDifference / static_cast<double>(foregroundCount);
-        require(foregroundMAD <= 0.5, "Brain tissue intensity diverges too much.");
-        require(maxDiff <= 2.0, "Localized intensity error is too high.");
+        require(foregroundMAD <= test_constants::PYTHON_FOREGROUND_MEAN_ABS_TOLERANCE, "Brain tissue intensity diverges too much.");
+        require(maxDiff <= test_constants::PYTHON_LOCALIZED_MAX_DIFF_TOLERANCE, "Localized intensity error is too high.");
 
-        const double meanAbsoluteDifference = totalDifference / static_cast<double>(leftData.size());
-        require(meanAbsoluteDifference <= meanAbsoluteDifferenceTolerance,
-                "Voxel payload diverges from Python beyond the allowed mean absolute difference.");
     }
 
     std::string shellEscapeString(const std::string &value)
@@ -283,7 +280,8 @@ void assertExactImageMatch(const std::filesystem::path &leftPath, const std::fil
                 << "copy_image = nib.MGHImage(orig_data, orig.affine, orig.header.copy())\n"
                 << "copy_image.set_data_dtype(orig_data.dtype)\n"
                 << "nib.save(copy_image, str(copy_path))\n"
-                << "kwargs = {'threshold_1mm': 0.95, 'vox_size': 'min', 'orientation': 'lia', 'img_size': 'fov'}\n"
+                << std::format("kwargs = {{'threshold_1mm': {}, 'vox_size': 'min', 'orientation': 'lia', 'img_size': 'fov'}}\n",
+                               test_constants::CONFORM_THRESHOLD_1MM)
                 << "if not is_conform(orig, verbose=False, **kwargs):\n"
                 << "    orig = conform(orig, **kwargs)\n"
                 << "    orig_data = np.asanyarray(orig.dataobj)\n"

@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 
+#include "TestConstants.h"
 #include "fastsurfer/core/mgh_image.h"
 #include "fastsurfer/core/nifti_converter.h"
 
@@ -59,7 +60,7 @@ void assertAffineClose(const fastsurfer::core::Matrix4 &actual, const fastsurfer
 {
     for (int row = 0; row < 4; ++row) {
         for (int column = 0; column < 4; ++column) {
-            requireNear(actual[row][column], expected[row][column], 1.0e-4,
+            requireNear(actual[row][column], expected[row][column], test_constants::AFFINE_LINEAR_TOLERANCE,
                         "Converted MGZ affine does not match the expected RAS-space affine.");
         }
     }
@@ -141,7 +142,7 @@ int main()
                 require(reloaded.header().type == convertedInMemory.header().type,
                     "In-memory and saved NIfTI conversions produced different storage types.");
             for (int axis = 0; axis < 3; ++axis) {
-                requireNear(reloaded.header().spacing[axis], fixture.spacing[axis], 1.0e-5,
+                requireNear(reloaded.header().spacing[axis], fixture.spacing[axis], test_constants::METADATA_SPACING_TOLERANCE,
                             "Converted MGZ spacing differs from the expected fixture spacing.");
             }
             require(reloaded.orientationCode() == fixture.orientation,
@@ -154,7 +155,7 @@ int main()
                     "In-memory and saved NIfTI conversions produced different voxel payloads.");
 
             for (const VoxelExpectation &voxel : fixture.voxels) {
-                requireNear(voxelAt(reloaded, voxel.index), voxel.value, 0.5,
+                requireNear(voxelAt(reloaded, voxel.index), voxel.value, test_constants::VOXEL_EXPECTATION_TOLERANCE,
                             "Converted MGZ voxel value differs from the selected fixture sample.");
             }
         }

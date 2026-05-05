@@ -5,6 +5,7 @@
 #include <stdexcept>
 #include <string>
 
+#include "TestConstants.h"
 #include "fastsurfer/core/nifti_converter.h"
 
 namespace {
@@ -106,7 +107,7 @@ int main()
                 << "roundtrip_data = np.asarray(reloaded.dataobj)\n"
                 << "if original.shape != reloaded.shape:\n"
                 << "    raise SystemExit(f'Shape mismatch after NIfTI round-trip: {original.shape} vs {reloaded.shape}')\n"
-                << "if not np.allclose(original.affine, reloaded.affine, atol=1e-4):\n"
+                << "if not np.allclose(original.affine, reloaded.affine, atol=" << test_constants::AFFINE_LINEAR_TOLERANCE << "):\n"
                 << "    raise SystemExit('Affine mismatch after NIfTI round-trip.')\n"
                 << "if not np.array_equal(original_data, roundtrip_data):\n"
                 << "    diff = float(np.max(np.abs(original_data - roundtrip_data)))\n"

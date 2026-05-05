@@ -17,6 +17,7 @@
 #include <itkImportImageFilter.h>
 #include <itkLinearInterpolateImageFunction.h>
 
+#include "TestConstants.h"
 #include "fastsurfer/core/step_conform_request.h"
 #include "fastsurfer/core/step_conform_result.h"
 #include "fastsurfer/core/step_conform.h"
@@ -43,6 +44,7 @@ struct ScalePolicy {
 struct ProbeStats {
     double maxPhysicalError {0.0};
     double maxIntensityError {0.0};
+    // p95 of absolute uint8 intensity error across sampled probes; units are grayscale levels.
     double percentile95IntensityError {0.0};
 };
 
@@ -119,13 +121,13 @@ void assertMatrixClose(
 
 float roundToEpsilonPrecision(const float value)
 {
-    constexpr float scale = 10000.0F;
+    constexpr float scale = test_constants::FLOAT_ROUNDING_SCALE;
     return std::round(value * scale) / scale;
 }
 
 int conformLikeCeil(const float value)
 {
-    constexpr double scale = 10000.0;
+    constexpr double scale = test_constants::DOUBLE_ROUNDING_SCALE;
     return static_cast<int>(std::ceil(std::floor(static_cast<double>(value) * scale) / scale));
 }
 
@@ -233,9 +235,9 @@ float computeTargetVoxelSize(const fastsurfer::core::MghImage &image, const fast
         throw std::runtime_error("Unsupported vox_size mode in the merged conform oracle.");
     }
 
-    float targetVoxelSize = std::min(roundToEpsilonPrecision(image.minVoxelSize()), 1.0F);
+    float targetVoxelSize = std::min(roundToEpsilonPrecision(image.minVoxelSize()), test_constants::UNIT_VOXEL_SIZE_MM);
     if (request.threshold1mm > 0.0F && targetVoxelSize > request.threshold1mm) {
-        targetVoxelSize = 1.0F;
+        targetVoxelSize = test_constants::UNIT_VOXEL_SIZE_MM;
     }
     return targetVoxelSize;
 }
@@ -246,7 +248,8 @@ std::array<int, 3> computeNativeTargetDimensions(
     const std::string &imageSizeMode)
 {
     if (imageSizeMode == "auto") {
-        if (std::fabs(targetVoxelSize - 1.0F) <= std::fabs(1.0F - 0.95F)) {
+        if (std::fabs(targetVoxelSize - test_constants::UNIT_VOXEL_SIZE_MM) <=
+            std::fabs(test_constants::UNIT_VOXEL_SIZE_MM - test_constants::CONFORM_THRESHOLD_1MM)) {
             return {256, 256, 256};
         }
 
@@ -410,7 +413,8 @@ bool rotationRequiresInterpolation(const Eigen::Matrix4d &vox2vox)
     for (int row = 0; row < 3; ++row) {
         for (int column = 0; column < 3; ++column) {
             const double absoluteValue = std::fabs(vox2vox(row, column));
-            if (!isClose(absoluteValue, 1.0, 1.0e-4) && !isClose(absoluteValue, 0.0, 1.0e-6)) {
+            if (!isClose(absoluteValue, 1.0, test_constants::ROTATION_UNIT_TOLERANCE) &&
+                !isClose(absoluteValue, 0.0, test_constants::ROTATION_ZERO_TOLERANCE)) {
                 return true;
             }
         }
@@ -545,7 +549,7 @@ ScalePolicy computeScalePolicy(const std::vector<float> &sourceData)
     std::vector<int> histogram(bins, 0);
     std::size_t nonZeroVoxels = 0;
     for (const float value : sourceData) {
-        if (std::fabs(value) >= 1.0e-15F) {
+        if (std::fabs(value) >= test_constants::HISTOGRAM_NON_ZERO_EPSILON) {
             ++nonZeroVoxels;
         }
 
@@ -586,7 +590,7 @@ ScalePolicy computeScalePolicy(const std::vector<float> &sourceData)
 
 float scaleExpectedValue(const float mappedValue, const ScalePolicy &policy)
 {
-    if (std::fabs(mappedValue) <= 1.0e-8F) {
+    if (std::fabs(mappedValue) <= test_constants::SCALED_ZERO_EPSILON) {
         return 0.0F;
     }
 
@@ -627,7 +631,9 @@ std::vector<int> axisProbeSamples(const int dimension)
     return samples;
 }
 
-std::vector<int> stratifiedAxisProbeSamples(const int dimension, const int binCount = 6)
+std::vector<int> stratifiedAxisProbeSamples(
+    const int dimension,
+    const int binCount = test_constants::STRATIFIED_PROBE_BIN_COUNT)
 {
     if (dimension <= 0) {
         return {};
@@ -657,7 +663,7 @@ std::array<int, 2> jitteredBinBounds(const int dimension, const int bin, const i
 
 std::vector<std::array<int, 3>> generateJitteredProbeIndices(
     const std::array<int, 3> &dimensions,
-    const int binCount = 3)
+    const int binCount = test_constants::JITTERED_PROBE_BIN_COUNT)
 {
     if (dimensions[0] <= 0 || dimensions[1] <= 0 || dimensions[2] <= 0) {
         return {};
@@ -667,7 +673,7 @@ std::vector<std::array<int, 3>> generateJitteredProbeIndices(
     const int effectiveBinsY = std::min(std::max(1, binCount), dimensions[1]);
     const int effectiveBinsZ = std::min(std::max(1, binCount), dimensions[2]);
 
-    std::mt19937 randomEngine(1337U);
+    std::mt19937 randomEngine(test_constants::JITTERED_PROBE_SEED);
     std::vector<std::array<int, 3>> probes;
     probes.reserve(static_cast<std::size_t>(effectiveBinsX * effectiveBinsY * effectiveBinsZ));
 
@@ -716,9 +722,9 @@ std::vector<std::array<int, 3>> generateProbeIndices(const std::array<int, 3> &d
     const auto boundaryXs = axisProbeSamples(dimensions[0]);
     const auto boundaryYs = axisProbeSamples(dimensions[1]);
     const auto boundaryZs = axisProbeSamples(dimensions[2]);
-    const auto stratifiedXs = stratifiedAxisProbeSamples(dimensions[0]);
-    const auto stratifiedYs = stratifiedAxisProbeSamples(dimensions[1]);
-    const auto stratifiedZs = stratifiedAxisProbeSamples(dimensions[2]);
+    const auto stratifiedXs = stratifiedAxisProbeSamples(dimensions[0], test_constants::STRATIFIED_PROBE_BIN_COUNT);
+    const auto stratifiedYs = stratifiedAxisProbeSamples(dimensions[1], test_constants::STRATIFIED_PROBE_BIN_COUNT);
+    const auto stratifiedZs = stratifiedAxisProbeSamples(dimensions[2], test_constants::STRATIFIED_PROBE_BIN_COUNT);
     const auto jitteredProbes = generateJitteredProbeIndices(dimensions);
 
     std::vector<std::array<int, 3>> probes;
@@ -742,8 +748,11 @@ double percentile95(std::vector<double> values)
         return 0.0;
     }
 
+    // Returns the 95th-percentile absolute intensity error in the same units as the
+    // sampled probe errors, i.e. uint8 grayscale levels rather than a normalized ratio.
     std::sort(values.begin(), values.end());
-    const std::size_t index = static_cast<std::size_t>(std::ceil(0.95 * static_cast<double>(values.size()))) - 1U;
+    const std::size_t index = static_cast<std::size_t>(
+        std::ceil(test_constants::PROBE_PERCENTILE_FRACTION * static_cast<double>(values.size()))) - 1U;
     return values[std::min(index, values.size() - 1U)];
 }
 
@@ -806,7 +815,7 @@ void assertCopyOrigMatches(
     assertMatrixClose(
         toEigenMatrix(copyImage.affine()),
         toEigenMatrix(expectedCopy.affine()),
-        1.0e-4,
+        test_constants::AFFINE_LINEAR_TOLERANCE,
         "The copy-orig MGZ affine differs from the direct NIfTI conversion affine.");
 }
 
@@ -834,7 +843,7 @@ void verifyOutputGeometry(
             "The conformed NIfTI output orientation code does not match the request policy.");
     require(outputImage.header().dimensions == expectedDimensions,
             "The conformed NIfTI output dimensions do not match the expected conform target dimensions.");
-    require(outputImage.hasIsotropicSpacing(targetVoxelSize, 1.0e-5F),
+    require(outputImage.hasIsotropicSpacing(targetVoxelSize, test_constants::METADATA_SPACING_TOLERANCE),
             "The conformed NIfTI output spacing does not match the expected isotropic target voxel size.");
 
     require(result.outputMetadata.dimensions == expectedDimensions,
@@ -847,13 +856,13 @@ void verifyOutputGeometry(
     requireNear(
         (toEigenVector(outputGeometry->GetOrigin()) - toEigenVector(expectedGeometry->GetOrigin())).norm(),
         0.0,
-        1.0e-4,
+        test_constants::PHYSICAL_POINT_TOLERANCE_MM,
         "The conformed MGZ origin differs from the merged conform geometry oracle.");
 
     assertMatrixClose(
         toEigenVector(outputGeometry->GetSpacing()),
         toEigenVector(expectedGeometry->GetSpacing()),
-        1.0e-5,
+        test_constants::METADATA_SPACING_TOLERANCE,
         "The conformed MGZ spacing differs from the merged conform geometry oracle.");
 
     const Eigen::Matrix3d actualDirection = toDirectionMatrix(outputGeometry->GetDirection());
@@ -861,14 +870,14 @@ void verifyOutputGeometry(
     assertMatrixClose(
         actualDirection,
         expectedDirection,
-        1.0e-5,
+        test_constants::DIRECTION_MATRIX_TOLERANCE,
         "The conformed direction matrix differs from the expected orientation policy.");
     assertMatrixClose(
         actualDirection.transpose() * actualDirection,
         Eigen::Matrix3d::Identity(),
-        1.0e-5,
+        test_constants::ORTHONORMALITY_TOLERANCE,
         "The conformed direction matrix is not orthonormal.");
-    requireNear(actualDirection.determinant(), expectedDirection.determinant(), 1.0e-5,
+    requireNear(actualDirection.determinant(), expectedDirection.determinant(), test_constants::DETERMINANT_TOLERANCE,
                 "The conformed direction handedness differs from the expected orientation policy.");
 
     requireNear(
@@ -876,7 +885,7 @@ void verifyOutputGeometry(
          toEigenVector(physicalCenter(outputGeometry, outputImage.header().dimensions)))
             .norm(),
         0.0,
-        1.0e-4,
+        test_constants::PHYSICAL_POINT_TOLERANCE_MM,
         "The conformed output center differs from the expected conform geometry.");
 }
 
@@ -903,11 +912,11 @@ void verifyOutputCase(
         expectedGeometry,
         computeScalePolicy(sourceOracle.data));
 
-    requireNear(probeStats.maxPhysicalError, 0.0, 1.0e-4,
-                "The conformed output physical landmarks differ from the affine oracle.");
-    require(probeStats.maxIntensityError <= 2.0,
+            requireNear(probeStats.maxPhysicalError, 0.0, test_constants::PHYSICAL_POINT_TOLERANCE_MM,
+            "The conformed output physical landmarks differ from the affine oracle.");
+            require(probeStats.maxIntensityError <= test_constants::PROBE_MAX_INTENSITY_ERROR_TOLERANCE,
             "The conformed output exceeded the maximum ITK-interpolated probe intensity error tolerance.");
-    require(probeStats.percentile95IntensityError <= 1.0,
+            require(probeStats.percentile95IntensityError <= test_constants::PROBE_PERCENTILE95_INTENSITY_ERROR_TOLERANCE,
             "The conformed output exceeded the 95th-percentile ITK-interpolated probe intensity error tolerance.");
 }
 
@@ -1030,11 +1039,11 @@ void test_subject140_already_conformed()
             "The conform step reported an unexpected input orientation for the Colin27-1 fixture.");
         require(result.inputMetadata.dataTypeName == expectedCopy.metadata().dataTypeName,
             "The conform step reported an unexpected input data type for the Colin27-1 fixture.");
-        requireNear(result.inputMetadata.spacing[0], expectedCopy.header().spacing[0], 1.0e-5F,
+        requireNear(result.inputMetadata.spacing[0], expectedCopy.header().spacing[0], test_constants::METADATA_SPACING_TOLERANCE,
                 "The conform step reported unexpected X spacing for the Colin27-1 fixture.");
-        requireNear(result.inputMetadata.spacing[1], expectedCopy.header().spacing[1], 1.0e-5F,
+        requireNear(result.inputMetadata.spacing[1], expectedCopy.header().spacing[1], test_constants::METADATA_SPACING_TOLERANCE,
                 "The conform step reported unexpected Y spacing for the Colin27-1 fixture.");
-        requireNear(result.inputMetadata.spacing[2], expectedCopy.header().spacing[2], 1.0e-5F,
+        requireNear(result.inputMetadata.spacing[2], expectedCopy.header().spacing[2], test_constants::METADATA_SPACING_TOLERANCE,
                 "The conform step reported unexpected Z spacing for the Colin27-1 fixture.");
 
         const auto copyImage = fastsurfer::core::MghImage::load(copyPath);
@@ -1057,11 +1066,11 @@ void test_oblique_nifti_cases()
             "The direct NIfTI conversion produced unexpected input dimensions for the oblique fixture.");
     require(expectedCopy.orientationCode() == "LPS",
             "The direct NIfTI conversion produced an unexpected input orientation for the oblique fixture.");
-    requireNear(expectedCopy.header().spacing[0], 0.8F, 1.0e-5F,
+    requireNear(expectedCopy.header().spacing[0], 0.8F, test_constants::METADATA_SPACING_TOLERANCE,
                 "The direct NIfTI conversion produced unexpected X spacing for the oblique fixture.");
-    requireNear(expectedCopy.header().spacing[1], 0.8F, 1.0e-5F,
+    requireNear(expectedCopy.header().spacing[1], 0.8F, test_constants::METADATA_SPACING_TOLERANCE,
                 "The direct NIfTI conversion produced unexpected Y spacing for the oblique fixture.");
-    requireNear(expectedCopy.header().spacing[2], 1.0F, 1.0e-5F,
+    requireNear(expectedCopy.header().spacing[2], 1.0F, test_constants::METADATA_SPACING_TOLERANCE,
                 "The direct NIfTI conversion produced unexpected Z spacing for the oblique fixture.");
 
     const SourceOracle sourceOracle = buildSourceOracle(expectedCopy);
@@ -1094,11 +1103,11 @@ void test_oblique_nifti_cases()
                 "The conform step reported an unexpected input orientation for the NIfTI fixture.");
         require(result.inputMetadata.dataTypeName == expectedCopy.metadata().dataTypeName,
                 "The conform step reported an unexpected input data type for the NIfTI fixture.");
-        requireNear(result.inputMetadata.spacing[0], 0.8F, 1.0e-5F,
+        requireNear(result.inputMetadata.spacing[0], 0.8F, test_constants::METADATA_SPACING_TOLERANCE,
                     "The conform step reported unexpected X spacing for the NIfTI fixture.");
-        requireNear(result.inputMetadata.spacing[1], 0.8F, 1.0e-5F,
+        requireNear(result.inputMetadata.spacing[1], 0.8F, test_constants::METADATA_SPACING_TOLERANCE,
                     "The conform step reported unexpected Y spacing for the NIfTI fixture.");
-        requireNear(result.inputMetadata.spacing[2], 1.0F, 1.0e-5F,
+        requireNear(result.inputMetadata.spacing[2], 1.0F, test_constants::METADATA_SPACING_TOLERANCE,
                     "The conform step reported unexpected Z spacing for the NIfTI fixture.");
 
         const auto copyImage = fastsurfer::core::MghImage::load(copyPath);

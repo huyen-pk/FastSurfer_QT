@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 
+#include "TestConstants.h"
 #include "fastsurfer/core/step_conform_request.h"
 #include "fastsurfer/core/step_conform.h"
 #include "fastsurfer/core/mgh_image.h"
@@ -77,7 +78,7 @@ fastsurfer::core::MghImage createSyntheticNonConformedInput(const std::filesyste
 bool allSpacingClose(const std::array<float, 3> &spacing, const float target)
 {
     return std::all_of(spacing.begin(), spacing.end(), [target](const float value) {
-        return std::fabs(value - target) <= 1.0e-4F;
+        return std::fabs(value - target) <= test_constants::PARITY_SPACING_TOLERANCE;
     });
 }
 
