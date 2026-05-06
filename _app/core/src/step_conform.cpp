@@ -244,8 +244,8 @@ bool rotationRequiresInterpolation(const Matrix4 &vox2vox)
     for (int row = 0; row < 3; ++row) {
         for (int column = 0; column < 3; ++column) {
             const double absoluteValue = std::fabs(vox2vox[row][column]);
-            if (!isClose(absoluteValue, 1.0, constants::conform::VoxelEpsilon) &&
-                !isClose(absoluteValue, 0.0, constants::conform::RotationEpsilon)) {
+            if (!isClose(absoluteValue, 1.0, constants::conform::VOXEL_EPSILON) &&
+                !isClose(absoluteValue, 0.0, constants::conform::ROTATION_EPSILON)) {
                 return true;
             }
         }
@@ -732,7 +732,7 @@ bool ConformStepService::isAlreadyConformed(const MghImage &image, const Conform
 
     return image.hasSingleFrame() &&
            image.isUint8() &&
-            image.hasIsotropicSpacing(targetVoxelSize, constants::conform::VoxelEpsilon) &&
+               image.hasIsotropicSpacing(targetVoxelSize, constants::conform::VOXEL_EPSILON) &&
            image.hasDimensions(targetDimensions) &&
            image.matchesOrientation(requestedOrientation);
 }

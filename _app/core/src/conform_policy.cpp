@@ -29,9 +29,9 @@ float computeTargetVoxelSize(const MghImage &image, const ConformStepRequest &re
         throw std::runtime_error("Unsupported vox_size mode in native conform service: " + to_string(request.voxSizeMode));
     }
 
-    float targetVoxelSize = std::min(roundToEpsilonPrecision(image.minVoxelSize()), constants::conform::UnitVoxelSizeMm);
+    float targetVoxelSize = std::min(roundToEpsilonPrecision(image.minVoxelSize()), constants::conform::UNIT_VOXEL_SIZE_MM);
     if (request.threshold1mm > 0.0F && targetVoxelSize > request.threshold1mm) {
-        targetVoxelSize = constants::conform::UnitVoxelSizeMm;
+        targetVoxelSize = constants::conform::UNIT_VOXEL_SIZE_MM;
     }
     return targetVoxelSize;
 }
@@ -42,17 +42,17 @@ std::array<int, 3> computeNativeTargetDimensions(
     const ImageSizeMode imageSizeMode)
 {
     if (imageSizeMode == ImageSizeMode::Auto) {
-        if (std::fabs(targetVoxelSize - constants::conform::UnitVoxelSizeMm) <=
-            std::fabs(constants::conform::UnitVoxelSizeMm - constants::conform::DefaultThreshold1mm)) {
+        if (std::fabs(targetVoxelSize - constants::conform::UNIT_VOXEL_SIZE_MM) <=
+            std::fabs(constants::conform::UNIT_VOXEL_SIZE_MM - constants::conform::DEFAULT_THRESHOLD_1MM)) {
             return {
-                constants::conform::DefaultAutoImageDimension,
-                constants::conform::DefaultAutoImageDimension,
-                constants::conform::DefaultAutoImageDimension,
+                constants::conform::DEFAULT_AUTO_IMAGE_DIMENSION,
+                constants::conform::DEFAULT_AUTO_IMAGE_DIMENSION,
+                constants::conform::DEFAULT_AUTO_IMAGE_DIMENSION,
             };
         }
 
         std::array<int, 3> target = image.header().dimensions;
-        int maxDimension = constants::conform::DefaultAutoImageDimension;
+        int maxDimension = constants::conform::DEFAULT_AUTO_IMAGE_DIMENSION;
         for (std::size_t index = 0; index < target.size(); ++index) {
             const float fov = image.header().spacing[index] * static_cast<float>(image.header().dimensions[index]);
             target[index] = conformLikeCeil(fov / targetVoxelSize);

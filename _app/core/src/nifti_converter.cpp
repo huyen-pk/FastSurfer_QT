@@ -93,7 +93,7 @@ MghImage::Header buildHeaderFromImage(const typename TImage::Pointer &image, con
     for (int column = 0; column < 3; ++column) {
         for (int row = 0; row < 3; ++row) {
             header.directionCosines[column * 3 + row] =
-                static_cast<float>(constants::nifti::LpsToRasSign[row] * lpsDirection[row][column]);
+                static_cast<float>(constants::nifti::LPS_TO_RAS_SIGN[row] * lpsDirection[row][column]);
         }
     }
 
@@ -105,9 +105,9 @@ MghImage::Header buildHeaderFromImage(const typename TImage::Pointer &image, con
     typename TImage::PointType centerPointLps;
     image->TransformContinuousIndexToPhysicalPoint(centerIndex, centerPointLps);
     header.center = {
-        static_cast<float>(constants::nifti::LpsToRasSign[0] * centerPointLps[0]),
-        static_cast<float>(constants::nifti::LpsToRasSign[1] * centerPointLps[1]),
-        static_cast<float>(constants::nifti::LpsToRasSign[2] * centerPointLps[2]),
+        static_cast<float>(constants::nifti::LPS_TO_RAS_SIGN[0] * centerPointLps[0]),
+        static_cast<float>(constants::nifti::LPS_TO_RAS_SIGN[1] * centerPointLps[1]),
+        static_cast<float>(constants::nifti::LPS_TO_RAS_SIGN[2] * centerPointLps[2]),
     };
     return header;
 }

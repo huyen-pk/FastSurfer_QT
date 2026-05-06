@@ -23,19 +23,15 @@ enum class MghDataType : std::int32_t {
 class MghImage {
 public:
     struct Header {
-        std::int32_t version {1};
+        std::int32_t version {constants::mgh::DEFAULT_VERSION};
         std::array<int, 3> dimensions {0, 0, 0};
-        std::int32_t frames {1};
+        std::int32_t frames {constants::mgh::DEFAULT_FRAME_COUNT};
         std::int32_t type {static_cast<std::int32_t>(MghDataType::UChar)};
-        std::int32_t degreesOfFreedom {0};
-        std::int16_t rasGoodFlag {1};
-        std::array<float, 3> spacing {1.0F, 1.0F, 1.0F};
-        std::array<float, 9> directionCosines {
-            -1.0F, 0.0F, 0.0F,
-            0.0F, 0.0F, -1.0F,
-            0.0F, 1.0F, 0.0F,
-        };
-        std::array<float, 3> center {0.0F, 0.0F, 0.0F};
+        std::int32_t degreesOfFreedom {constants::mgh::DEFAULT_DEGREES_OF_FREEDOM};
+        std::int16_t rasGoodFlag {constants::mgh::DEFAULT_RAS_GOOD_FLAG};
+        std::array<float, 3> spacing {constants::mgh::DEFAULT_SPACING};
+        std::array<float, 9> directionCosines {constants::mgh::DEFAULT_DIRECTION_COSINES};
+        std::array<float, 3> center {constants::mgh::DEFAULT_CENTER};
     };
 
     MghImage() = default;
@@ -53,7 +49,7 @@ public:
     bool hasSingleFrame() const;
     bool isUint8() const;
     bool hasDimensions(const std::array<int, 3> &dimensions) const;
-    bool hasIsotropicSpacing(float targetSpacing, float epsilon = constants::conform::VoxelEpsilon) const;
+    bool hasIsotropicSpacing(float targetSpacing, float epsilon = constants::conform::VOXEL_EPSILON) const;
     bool matchesOrientation(const std::string &targetOrientation) const;
 
     Matrix4 affine() const;

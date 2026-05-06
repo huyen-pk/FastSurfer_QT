@@ -112,7 +112,7 @@ struct ConformStepRequest {
     VoxelSizeMode voxSizeMode {VoxelSizeMode::Min};
     ImageSizeMode imageSizeMode {ImageSizeMode::Auto};
     OrientationMode orientation {OrientationMode::Lia};
-    float threshold1mm {constants::conform::DefaultThreshold1mm};
+    float threshold1mm {constants::conform::DEFAULT_THRESHOLD_1MM};
     bool forceConform {false};
 };
 
