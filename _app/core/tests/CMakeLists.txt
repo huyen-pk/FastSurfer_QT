@@ -2,6 +2,25 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 get_filename_component(FASTSURFER_REPO_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../.." ABSOLUTE)
 
+add_executable(test_conform_policy
+    test_conform_policy.cpp
+)
+
+target_link_libraries(test_conform_policy
+    PRIVATE
+        fastsurfer_core
+)
+
+add_test(NAME compute_target_voxel_size_should_respect_threshold_cases COMMAND test_conform_policy threshold)
+
+add_test(NAME compute_native_target_dimensions_should_distinguish_auto_from_fov COMMAND test_conform_policy auto-vs-fov)
+
+add_test(NAME compute_native_target_dimensions_should_cube_anisotropic_auto_size COMMAND test_conform_policy anisotropic-auto)
+
+add_test(NAME compute_native_target_dimensions_should_floor_small_auto_size_to_256_cube COMMAND test_conform_policy small-auto-floor-256)
+
+add_test(NAME parse_conform_modes_should_round_trip_supported_values_and_reject_invalid_input COMMAND test_conform_policy mode-parsing)
+
 add_executable(test_step_conform
     test_step_conform.cpp
 )

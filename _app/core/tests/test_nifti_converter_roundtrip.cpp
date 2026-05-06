@@ -6,6 +6,7 @@
 #include <string>
 
 #include "TestConstants.h"
+#include "TestHelpers.h"
 #include "fastsurfer/core/nifti_converter.h"
 
 namespace {
@@ -25,12 +26,7 @@ std::filesystem::path makeFreshDirectory(const std::string &name)
     return root;
 }
 
-void require(const bool condition, const std::string &message)
-{
-    if (!condition) {
-        throw std::runtime_error(message);
-    }
-}
+// assertion helpers are provided by TestHelpers.h
 
 std::string shellEscape(const std::filesystem::path &path)
 {

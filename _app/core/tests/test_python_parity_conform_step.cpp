@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "TestConstants.h"
+#include "TestHelpers.h"
 #include "fastsurfer/core/step_conform_request.h"
 #include "fastsurfer/core/step_conform.h"
 #include "fastsurfer/core/mgh_image.h"
@@ -38,12 +39,7 @@ std::filesystem::path makeFreshDirectory(const std::string &name)
     return root;
 }
 
-void require(const bool condition, const std::string &message)
-{
-    if (!condition) {
-        throw std::runtime_error(message);
-    }
-}
+// use shared TestHelpers.h for assertion helpers
 
 std::string shellEscape(const std::filesystem::path &path)
 {
@@ -296,7 +292,7 @@ void assertComparableConformedImages(
         request.inputPath = syntheticInputPath;
         request.copyOrigPath = nativeCopy;
         request.conformedPath = nativeConformed;
-        request.imageSizeMode = "fov";
+        request.imageSizeMode = fastsurfer::core::ImageSizeMode::Fov;
 
         fastsurfer::core::ConformStepService service;
         const auto nativeResult = service.run(request);
@@ -344,8 +340,8 @@ void assertComparableConformedImages(
         request.inputPath = fixturePath;
         request.copyOrigPath = nativeCopy;
         request.conformedPath = nativeConformed;
-        request.imageSizeMode = "fov";
-        request.orientation = "lia";
+        request.imageSizeMode = fastsurfer::core::ImageSizeMode::Fov;
+        request.orientation = fastsurfer::core::OrientationMode::Lia;
 
         fastsurfer::core::ConformStepService service;
         const auto nativeResult = service.run(request);

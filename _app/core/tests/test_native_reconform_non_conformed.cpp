@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "TestConstants.h"
+#include "TestHelpers.h"
 #include "fastsurfer/core/step_conform_request.h"
 #include "fastsurfer/core/step_conform.h"
 #include "fastsurfer/core/mgh_image.h"
@@ -21,12 +22,7 @@ std::filesystem::path makeUniqueDirectory(const std::string &name)
     return root;
 }
 
-void require(const bool condition, const std::string &message)
-{
-    if (!condition) {
-        throw std::runtime_error(message);
-    }
-}
+// assertion helpers are provided by TestHelpers.h
 
 fastsurfer::core::MghImage createSyntheticNonConformedInput(const std::filesystem::path &fixturePath)
 {
@@ -102,7 +98,7 @@ int main()
         request.inputPath = inputPath;
         request.copyOrigPath = copyPath;
         request.conformedPath = conformedPath;
-        request.imageSizeMode = "fov";
+        request.imageSizeMode = fastsurfer::core::ImageSizeMode::Fov;
 
         fastsurfer::core::ConformStepService service;
         const auto result = service.run(request);

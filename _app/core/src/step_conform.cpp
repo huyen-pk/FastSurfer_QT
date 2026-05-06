@@ -13,14 +13,13 @@
 #include <itkImage.h>
 #include <itkImportImageFilter.h>
 
+#include "fastsurfer/core/constants.h"
+#include "fastsurfer/core/conform_policy.h"
 #include "fastsurfer/core/mgh_image.h"
 #include "fastsurfer/core/nifti_converter.h"
 
 namespace fastsurfer::core {
 namespace {
-
-constexpr float kVoxelEpsilon = 1.0e-4F;
-constexpr double kRotationEpsilon = 1.0e-6;
 
 using Matrix3 = std::array<std::array<double, 3>, 3>;
 using Vector3 = std::array<double, 3>;
@@ -32,24 +31,21 @@ struct OrientationTransform {
     std::array<int, 3> flips {1, 1, 1};
 };
 
-float roundToEpsilonPrecision(const float value)
-{
-    constexpr float scale = 10000.0F;
-    return std::round(value * scale) / scale;
-}
-
-int conformLikeCeil(const float value)
-{
-    constexpr double scale = 10000.0;
-    return static_cast<int>(std::ceil(std::floor(static_cast<double>(value) * scale) / scale));
-}
-
 std::string normalizeUpper(std::string value)
 {
     std::transform(value.begin(), value.end(), value.begin(), [](unsigned char character) {
         return static_cast<char>(std::toupper(character));
     });
     return value;
+}
+
+std::string resolveOrientationCode(const OrientationMode requestedOrientation, const std::string &sourceOrientation)
+{
+    if (requestedOrientation == OrientationMode::Native) {
+        return sourceOrientation;
+    }
+
+    return normalizeUpper(to_string(requestedOrientation));
 }
 
 int axisGroup(const char axisCode)
@@ -248,7 +244,8 @@ bool rotationRequiresInterpolation(const Matrix4 &vox2vox)
     for (int row = 0; row < 3; ++row) {
         for (int column = 0; column < 3; ++column) {
             const double absoluteValue = std::fabs(vox2vox[row][column]);
-            if (!isClose(absoluteValue, 1.0, kVoxelEpsilon) && !isClose(absoluteValue, 0.0, kRotationEpsilon)) {
+            if (!isClose(absoluteValue, 1.0, constants::conform::VoxelEpsilon) &&
+                !isClose(absoluteValue, 0.0, constants::conform::RotationEpsilon)) {
                 return true;
             }
         }
@@ -396,57 +393,15 @@ std::array<float, 3> headerCenterFromAffine(const Matrix4 &affine, const std::ar
     return center;
 }
 
-std::array<int, 3> computeTargetImageSize(const MghImage &image, const float targetVoxelSize, const std::string &imageSizeMode)
-{
-    if (imageSizeMode == "auto") {
-        if (std::fabs(targetVoxelSize - 1.0F) <= std::fabs(1.0F - 0.95F)) {
-            return {256, 256, 256};
-        }
-
-        std::array<int, 3> target = image.header().dimensions;
-        int maxDimension = 256;
-        for (std::size_t index = 0; index < target.size(); ++index) {
-            const float fov = image.header().spacing[index] * static_cast<float>(image.header().dimensions[index]);
-            target[index] = conformLikeCeil(fov / targetVoxelSize);
-            maxDimension = std::max(maxDimension, target[index]);
-        }
-        return {maxDimension, maxDimension, maxDimension};
-    }
-
-    if (imageSizeMode == "fov") {
-        std::array<int, 3> target = image.header().dimensions;
-        for (std::size_t index = 0; index < target.size(); ++index) {
-            const float fov = image.header().spacing[index] * static_cast<float>(image.header().dimensions[index]);
-            target[index] = conformLikeCeil(fov / targetVoxelSize);
-        }
-        return target;
-    }
-
-    throw std::runtime_error("Unsupported image_size mode in native conform service: " + imageSizeMode);
-}
-
-float computeTargetVoxelSize(const MghImage &image, const ConformStepRequest &request)
-{
-    if (request.voxSizeMode == "min") {
-        float targetVoxelSize = std::min(roundToEpsilonPrecision(image.minVoxelSize()), 1.0F);
-        if (request.threshold1mm > 0.0F && targetVoxelSize > request.threshold1mm) {
-            targetVoxelSize = 1.0F;
-        }
-        return targetVoxelSize;
-    }
-
-    throw std::runtime_error("Unsupported vox_size mode in native conform service: " + request.voxSizeMode);
-}
-
 MghImage::Header buildTargetHeader(
     const MghImage &image,
     const float targetVoxelSize,
     const std::array<int, 3> &nativeTargetDimensions,
-    const std::string &requestedOrientation)
+    const OrientationMode requestedOrientation)
 {
     const std::string sourceOrientation = image.orientationCode();
-    const std::string orientation = requestedOrientation == "native" ? sourceOrientation : normalizeUpper(requestedOrientation);
-    const std::array<int, 3> targetDimensions = requestedOrientation == "native"
+    const std::string orientation = resolveOrientationCode(requestedOrientation, sourceOrientation);
+    const std::array<int, 3> targetDimensions = requestedOrientation == OrientationMode::Native
         ? nativeTargetDimensions
         : targetDimensionsForOrientation(nativeTargetDimensions, sourceOrientation, orientation);
 
@@ -456,7 +411,7 @@ MghImage::Header buildTargetHeader(
     header.rasGoodFlag = 1;
     header.spacing = {targetVoxelSize, targetVoxelSize, targetVoxelSize};
     header.dimensions = targetDimensions;
-    header.directionCosines = requestedOrientation == "native"
+    header.directionCosines = requestedOrientation == OrientationMode::Native
         ? image.header().directionCosines
         : directionCosinesForOrientation(orientation);
 
@@ -772,13 +727,14 @@ std::vector<float> scaleAndCrop(
 bool ConformStepService::isAlreadyConformed(const MghImage &image, const ConformStepRequest &request)
 {
     const float targetVoxelSize = computeTargetVoxelSize(image, request);
-    const auto targetDimensions = computeTargetImageSize(image, targetVoxelSize, request.imageSizeMode);
+    const auto targetDimensions = computeNativeTargetDimensions(image, targetVoxelSize, request.imageSizeMode);
+    const std::string requestedOrientation = resolveOrientationCode(request.orientation, image.orientationCode());
 
     return image.hasSingleFrame() &&
            image.isUint8() &&
-           image.hasIsotropicSpacing(targetVoxelSize, kVoxelEpsilon) &&
+            image.hasIsotropicSpacing(targetVoxelSize, constants::conform::VoxelEpsilon) &&
            image.hasDimensions(targetDimensions) &&
-           image.matchesOrientation(request.orientation);
+           image.matchesOrientation(requestedOrientation);
 }
 
 ConformStepResult ConformStepService::run(const ConformStepRequest &request) const
@@ -818,7 +774,7 @@ ConformStepResult ConformStepService::run(const ConformStepRequest &request) con
     }
 
     const float targetVoxelSize = computeTargetVoxelSize(image, request);
-    const auto nativeTargetDimensions = computeTargetImageSize(image, targetVoxelSize, request.imageSizeMode);
+    const auto nativeTargetDimensions = computeNativeTargetDimensions(image, targetVoxelSize, request.imageSizeMode);
     const MghImage::Header targetHeader = buildTargetHeader(image, targetVoxelSize, nativeTargetDimensions, request.orientation);
     const Matrix4 targetAffine = affineFromHeader(targetHeader);
     const Matrix4 targetToSource = multiply(inverseAffine(image.affine()), targetAffine);

@@ -18,13 +18,30 @@
 #include <itkLinearInterpolateImageFunction.h>
 
 #include "TestConstants.h"
+#include "TestHelpers.h"
 #include "fastsurfer/core/step_conform_request.h"
 #include "fastsurfer/core/step_conform_result.h"
 #include "fastsurfer/core/step_conform.h"
+#include "fastsurfer/core/conform_policy.h"
 #include "fastsurfer/core/mgh_image.h"
 #include "fastsurfer/core/nifti_converter.h"
 
 namespace {
+
+std::string resolveRequestedOrientationCode(
+    const fastsurfer::core::OrientationMode requestedOrientation,
+    const std::string &sourceOrientation)
+{
+    if (requestedOrientation == fastsurfer::core::OrientationMode::Native) {
+        return sourceOrientation;
+    }
+
+    std::string orientation = fastsurfer::core::to_string(requestedOrientation);
+    std::transform(orientation.begin(), orientation.end(), orientation.begin(), [](unsigned char character) {
+        return static_cast<char>(std::toupper(character));
+    });
+    return orientation;
+}
 
 using FloatImage3D = itk::Image<float, 3>;
 using ImportFilter = itk::ImportImageFilter<float, 3>;
@@ -63,26 +80,7 @@ std::filesystem::path makeFreshDirectory(const std::string &name)
     return root;
 }
 
-void require(const bool condition, const std::string &message)
-{
-    if (!condition) {
-        throw std::runtime_error(message);
-    }
-}
-
-void requireNear(const float left, const float right, const float tolerance, const std::string &message)
-{
-    if (std::fabs(left - right) > tolerance) {
-        throw std::runtime_error(message + " Expected=" + std::to_string(right) + " actual=" + std::to_string(left));
-    }
-}
-
-void requireNear(const double left, const double right, const double tolerance, const std::string &message)
-{
-    if (std::fabs(left - right) > tolerance) {
-        throw std::runtime_error(message + " Expected=" + std::to_string(right) + " actual=" + std::to_string(left));
-    }
-}
+// assertion helpers are provided by TestHelpers.h
 
 Eigen::Matrix4d toEigenMatrix(const fastsurfer::core::Matrix4 &matrix)
 {
@@ -117,18 +115,6 @@ void assertMatrixClose(
     if (maxCoefficientError > tolerance) {
         throw std::runtime_error(message + " Max coefficient error=" + std::to_string(maxCoefficientError));
     }
-}
-
-float roundToEpsilonPrecision(const float value)
-{
-    constexpr float scale = test_constants::FLOAT_ROUNDING_SCALE;
-    return std::round(value * scale) / scale;
-}
-
-int conformLikeCeil(const float value)
-{
-    constexpr double scale = test_constants::DOUBLE_ROUNDING_SCALE;
-    return static_cast<int>(std::ceil(std::floor(static_cast<double>(value) * scale) / scale));
 }
 
 std::string normalizeUpper(std::string value)
@@ -227,52 +213,6 @@ std::array<int, 3> targetDimensionsForOrientation(
     }
 
     return targetDimensions;
-}
-
-float computeTargetVoxelSize(const fastsurfer::core::MghImage &image, const fastsurfer::core::ConformStepRequest &request)
-{
-    if (request.voxSizeMode != "min") {
-        throw std::runtime_error("Unsupported vox_size mode in the merged conform oracle.");
-    }
-
-    float targetVoxelSize = std::min(roundToEpsilonPrecision(image.minVoxelSize()), test_constants::UNIT_VOXEL_SIZE_MM);
-    if (request.threshold1mm > 0.0F && targetVoxelSize > request.threshold1mm) {
-        targetVoxelSize = test_constants::UNIT_VOXEL_SIZE_MM;
-    }
-    return targetVoxelSize;
-}
-
-std::array<int, 3> computeNativeTargetDimensions(
-    const fastsurfer::core::MghImage &image,
-    const float targetVoxelSize,
-    const std::string &imageSizeMode)
-{
-    if (imageSizeMode == "auto") {
-        if (std::fabs(targetVoxelSize - test_constants::UNIT_VOXEL_SIZE_MM) <=
-            std::fabs(test_constants::UNIT_VOXEL_SIZE_MM - test_constants::CONFORM_THRESHOLD_1MM)) {
-            return {256, 256, 256};
-        }
-
-        std::array<int, 3> target = image.header().dimensions;
-        int maxDimension = 256;
-        for (std::size_t index = 0; index < target.size(); ++index) {
-            const float fov = image.header().spacing[index] * static_cast<float>(image.header().dimensions[index]);
-            target[index] = conformLikeCeil(fov / targetVoxelSize);
-            maxDimension = std::max(maxDimension, target[index]);
-        }
-        return {maxDimension, maxDimension, maxDimension};
-    }
-
-    if (imageSizeMode == "fov") {
-        std::array<int, 3> target = image.header().dimensions;
-        for (std::size_t index = 0; index < target.size(); ++index) {
-            const float fov = image.header().spacing[index] * static_cast<float>(image.header().dimensions[index]);
-            target[index] = conformLikeCeil(fov / targetVoxelSize);
-        }
-        return target;
-    }
-
-    throw std::runtime_error("Unsupported image_size mode in the merged conform oracle.");
 }
 
 Eigen::Vector4d voxelCenter(const std::array<int, 3> &dimensions)
@@ -459,10 +399,8 @@ FloatImage3D::Pointer buildExpectedGeometry(
     const float targetVoxelSize,
     const std::array<int, 3> &nativeTargetDimensions)
 {
-    const bool useNativeOrientation = request.orientation == "native";
-    const std::string targetOrientation = useNativeOrientation
-        ? sourceImage.orientationCode()
-        : normalizeUpper(request.orientation);
+    const bool useNativeOrientation = request.orientation == fastsurfer::core::OrientationMode::Native;
+    const std::string targetOrientation = resolveRequestedOrientationCode(request.orientation, sourceImage.orientationCode());
     const auto targetDimensions = useNativeOrientation
         ? nativeTargetDimensions
         : targetDimensionsForOrientation(
@@ -826,12 +764,10 @@ void verifyOutputGeometry(
     const fastsurfer::core::ConformStepResult &result,
     const fastsurfer::core::MghImage &outputImage)
 {
-    const float targetVoxelSize = computeTargetVoxelSize(sourceImage, request);
+    const float targetVoxelSize = fastsurfer::core::computeTargetVoxelSize(sourceImage, request);
     const auto nativeTargetDimensions =
-        computeNativeTargetDimensions(sourceImage, targetVoxelSize, request.imageSizeMode);
-    const std::string expectedOrientation = request.orientation == "native"
-        ? sourceImage.orientationCode()
-        : normalizeUpper(request.orientation);
+        fastsurfer::core::computeNativeTargetDimensions(sourceImage, targetVoxelSize, request.imageSizeMode);
+    const std::string expectedOrientation = resolveRequestedOrientationCode(request.orientation, sourceImage.orientationCode());
     const auto expectedGeometry =
         buildExpectedGeometry(sourceImage, sourceOracle, request, targetVoxelSize, nativeTargetDimensions);
     const auto expectedDimensions = dimensionsFromGeometry(expectedGeometry);
@@ -898,9 +834,9 @@ void verifyOutputCase(
 {
     verifyOutputGeometry(sourceImage, sourceOracle, request, result, outputImage);
 
-    const float targetVoxelSize = computeTargetVoxelSize(sourceImage, request);
+    const float targetVoxelSize = fastsurfer::core::computeTargetVoxelSize(sourceImage, request);
     const auto nativeTargetDimensions =
-        computeNativeTargetDimensions(sourceImage, targetVoxelSize, request.imageSizeMode);
+        fastsurfer::core::computeNativeTargetDimensions(sourceImage, targetVoxelSize, request.imageSizeMode);
     const auto expectedGeometry =
         buildExpectedGeometry(sourceImage, sourceOracle, request, targetVoxelSize, nativeTargetDimensions);
     const auto outputGeometry = buildGeometryImage(outputImage);
@@ -1014,8 +950,8 @@ void test_subject140_already_conformed()
         const SourceOracle sourceOracle = buildSourceOracle(expectedCopy);
         fastsurfer::core::ConformStepService service;
 
-        for (const std::string &orientation : {std::string("native"), std::string("lia")}) {
-        const auto caseDir = outputDir / orientation;
+        for (const fastsurfer::core::OrientationMode orientation : {fastsurfer::core::OrientationMode::Native, fastsurfer::core::OrientationMode::Lia}) {
+        const auto caseDir = outputDir / fastsurfer::core::to_string(orientation);
         const auto copyPath = caseDir / "copy_orig.mgz";
         const auto conformedPath = caseDir / "conformed_orig.mgz";
 
@@ -1076,8 +1012,8 @@ void test_oblique_nifti_cases()
     const SourceOracle sourceOracle = buildSourceOracle(expectedCopy);
     fastsurfer::core::ConformStepService service;
 
-    for (const std::string &orientation : {std::string("native"), std::string("lia")}) {
-        const auto caseDir = outputDir / orientation;
+    for (const fastsurfer::core::OrientationMode orientation : {fastsurfer::core::OrientationMode::Native, fastsurfer::core::OrientationMode::Lia}) {
+        const auto caseDir = outputDir / fastsurfer::core::to_string(orientation);
         const auto copyPath = caseDir / "copy_orig.mgz";
         const auto conformedPath = caseDir / "conformed_orig.mgz";
 

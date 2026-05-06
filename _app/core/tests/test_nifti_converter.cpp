@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "TestConstants.h"
+#include "TestHelpers.h"
 #include "fastsurfer/core/mgh_image.h"
 #include "fastsurfer/core/nifti_converter.h"
 
@@ -42,19 +43,7 @@ std::filesystem::path makeFreshDirectory(const std::string &name)
     return root;
 }
 
-void require(const bool condition, const std::string &message)
-{
-    if (!condition) {
-        throw std::runtime_error(message);
-    }
-}
-
-void requireNear(const double left, const double right, const double tolerance, const std::string &message)
-{
-    if (std::fabs(left - right) > tolerance) {
-        throw std::runtime_error(message + " Expected=" + std::to_string(right) + " actual=" + std::to_string(left));
-    }
-}
+// assertion helpers are provided by TestHelpers.h
 
 void assertAffineClose(const fastsurfer::core::Matrix4 &actual, const fastsurfer::core::Matrix4 &expected)
 {

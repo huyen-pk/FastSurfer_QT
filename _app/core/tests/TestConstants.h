@@ -7,6 +7,8 @@ namespace test_constants {
 
 inline constexpr float CONFORM_THRESHOLD_1MM = 0.95F;
 inline constexpr float UNIT_VOXEL_SIZE_MM = 1.0F;
+// Tolerance used when comparing computed target voxel sizes in unit tests.
+inline constexpr float CONFORM_POLICY_VOXEL_TOLERANCE = 1.0e-5F;
 inline constexpr float FLOAT_ROUNDING_SCALE = 10000.0F;
 inline constexpr double DOUBLE_ROUNDING_SCALE = 10000.0;
 

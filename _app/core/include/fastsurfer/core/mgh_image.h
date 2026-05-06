@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 
+#include "fastsurfer/core/constants.h"
 #include "fastsurfer/core/image_metadata.h"
 
 namespace fastsurfer::core {
@@ -52,7 +53,7 @@ public:
     bool hasSingleFrame() const;
     bool isUint8() const;
     bool hasDimensions(const std::array<int, 3> &dimensions) const;
-    bool hasIsotropicSpacing(float targetSpacing, float epsilon = 1.0e-4F) const;
+    bool hasIsotropicSpacing(float targetSpacing, float epsilon = constants::conform::VoxelEpsilon) const;
     bool matchesOrientation(const std::string &targetOrientation) const;
 
     Matrix4 affine() const;

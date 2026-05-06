@@ -10,12 +10,10 @@
 
 #include <zlib.h>
 
+#include "fastsurfer/core/constants.h"
+
 namespace fastsurfer::core {
 namespace {
-
-constexpr std::size_t kHeaderSize = 284;
-constexpr std::size_t kRasGoodFlagOffset = 28;
-constexpr std::size_t kSpacingOffset = 30;
 
 using Matrix3 = std::array<std::array<double, 3>, 3>;
 using Vector3 = std::array<double, 3>;
@@ -282,7 +280,7 @@ MghImage MghImage::load(const std::filesystem::path &path)
         throw std::runtime_error("Failed to open MGZ file: " + path.string());
     }
 
-    std::array<std::uint8_t, kHeaderSize> headerBytes {};
+    std::array<std::uint8_t, constants::mgh::HeaderSize> headerBytes {};
     const int readCount = gzread(file, headerBytes.data(), static_cast<unsigned int>(headerBytes.size()));
     if (readCount != static_cast<int>(headerBytes.size())) {
         gzclose(file);
@@ -299,9 +297,9 @@ MghImage MghImage::load(const std::filesystem::path &path)
     image.m_header.frames = readInt32BigEndian(&headerBytes[16]);
     image.m_header.type = readInt32BigEndian(&headerBytes[20]);
     image.m_header.degreesOfFreedom = readInt32BigEndian(&headerBytes[24]);
-    image.m_header.rasGoodFlag = readInt16BigEndian(&headerBytes[kRasGoodFlagOffset]);
+    image.m_header.rasGoodFlag = readInt16BigEndian(&headerBytes[constants::mgh::RasGoodFlagOffset]);
 
-    std::size_t offset = kSpacingOffset;
+    std::size_t offset = constants::mgh::SpacingOffset;
     for (float &spacing : image.m_header.spacing) {
         spacing = readFloatBigEndian(&headerBytes[offset]);
         offset += 4;
@@ -333,7 +331,7 @@ void MghImage::save(const std::filesystem::path &path) const
 {
     std::filesystem::create_directories(path.parent_path());
 
-    std::array<std::uint8_t, kHeaderSize> headerBytes {};
+    std::array<std::uint8_t, constants::mgh::HeaderSize> headerBytes {};
     writeInt32BigEndian(&headerBytes[0], m_header.version);
     writeInt32BigEndian(&headerBytes[4], m_header.dimensions[0]);
     writeInt32BigEndian(&headerBytes[8], m_header.dimensions[1]);
@@ -341,9 +339,9 @@ void MghImage::save(const std::filesystem::path &path) const
     writeInt32BigEndian(&headerBytes[16], m_header.frames);
     writeInt32BigEndian(&headerBytes[20], m_header.type);
     writeInt32BigEndian(&headerBytes[24], m_header.degreesOfFreedom);
-    writeInt16BigEndian(&headerBytes[kRasGoodFlagOffset], m_header.rasGoodFlag);
+    writeInt16BigEndian(&headerBytes[constants::mgh::RasGoodFlagOffset], m_header.rasGoodFlag);
 
-    std::size_t offset = kSpacingOffset;
+    std::size_t offset = constants::mgh::SpacingOffset;
     for (const float spacing : m_header.spacing) {
         writeFloatBigEndian(&headerBytes[offset], spacing);
         offset += 4;
