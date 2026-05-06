@@ -8,18 +8,18 @@ This workflow orchestrates the interaction between the Architect, Coder, Reviewe
 
 ## Step 1: Planning (Architect)
 - The Architect analyzes the task and existing codebase.
- - The Architect produces an `implementation_plan.md` artifact inside `app/specs/{feature_name}`.
+ - The Architect produces an `implementation_plan.md` artifact inside `specs/{modules}/{feature_name}`.
 - **Git Isolation**: The Architect sets up an isolated Git worktree for the feature development (e.g., in a `.worktrees/` directory) and ensures these paths are added to the root `.gitignore`.
- - **Output:** `implementation_plan.md` inside `app/specs/{feature_name}` (use lowercase, underscore-separated `feature_name`) and initialized worktree environment.
+ - **Output:** `implementation_plan.md` inside `specs/{modules}/{feature_name}` (use lowercase, underscore-separated `feature_name`) and initialized worktree environment.
 
 ## Step 2: Human Approval (Architecture)
-- **Action**: The USER reviews the `implementation_plan.md` inside `app/specs/{feature_name}`.
+- **Action**: The USER reviews the `implementation_plan.md` inside `specs/{modules}/{feature_name}`.
 - **Constraint**: The workflow **must not proceed** until the user approves or directs adjustments.
 
 ## Step 3: Behaviour Driven Tests (Product Owner)
 - The Product Owner analyzes the task/plan to define acceptance criteria.
 - The Product Owner writes high-level BDD tests (Gherkin/features or similar) using **real dependencies**.
- - **Output:** New BDD requirements placed at `app/specs/{feature_name}/bdd_requirements.md` (one folder per feature; use lowercase, underscore-separated `feature_name`). BDD tests derived from these requirements must adhere to rules in `app/SKILLS.md`.
+ - **Output:** New BDD requirements placed at `specs/{modules}/{feature_name}/bdd_requirements.md` (one folder per feature; use lowercase, underscore-separated `feature_name`). BDD tests derived from these requirements must adhere to rules in `app/SKILLS.md`.
 
 ## Step 4: Human Approval (Tests)
 - **Action**: The USER reviews the BDD tests to ensure they align with requirements.
