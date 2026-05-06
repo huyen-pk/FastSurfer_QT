@@ -87,7 +87,7 @@ core/
   tests/
     CMakeLists.txt
     test_step_conform.cpp
-    test_python_parity_conform_step.cpp
+    test_step_conform_parity.cpp
 ```
 
 Primary types:

@@ -22,7 +22,7 @@ Status: approved by user on 2026-05-03.
 - `core/src/imaging/mri/fastsurfer/step_conform.cpp` — route NIfTI inputs through the explicit converter instead of overloading `MghImage::load()`.
 - `core/tests/CMakeLists.txt` — register new NIfTI conversion and integration tests.
 - `core/tests/imaging/mri/fastsurfer/test_step_conform.cpp` — reference pattern for direct service invocation.
-- `core/tests/imaging/mri/fastsurfer/test_python_parity_conform_step.cpp` — reference pattern for real-file comparison and temp outputs; do not make it the only oracle for conversion correctness.
+- `core/tests/imaging/mri/fastsurfer/test_step_conform_parity.cpp` — reference pattern for real-file comparison and temp outputs; do not make it the only oracle for conversion correctness.
 - `data/parrec_oblique/README.md` — source description for real oblique fixtures.
 - `specs/core/imaging/pipeline_conform_and_save_orig/implementation_plan.md` and `specs/core/imaging/pipeline_conform_and_save_orig/bdd_requirements.md` — update scope notes after implementation if the repo continues to use this feature folder.
 

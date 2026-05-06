@@ -106,20 +106,20 @@ target_compile_definitions(test_native_reconform_non_conformed
 
 add_test(NAME run_conform_step_on_non_conformed_mgz_should_produce_conformed_output COMMAND test_native_reconform_non_conformed)
 
-add_executable(test_python_parity_conform_step
-    imaging/mri/fastsurfer/test_python_parity_conform_step.cpp
+add_executable(test_step_conform_parity
+    imaging/mri/fastsurfer/test_step_conform_parity.cpp
 )
 
-target_link_libraries(test_python_parity_conform_step
+target_link_libraries(test_step_conform_parity
     PRIVATE
         openhc_imaging_mri_fastsurfer
 )
 
-target_compile_definitions(test_python_parity_conform_step
+target_compile_definitions(test_step_conform_parity
     PRIVATE
         FASTSURFER_REPO_ROOT="${FASTSURFER_REPO_ROOT}"
 )
 
-add_test(NAME run_conform_step_should_match_python_reference_on_conformed_image COMMAND test_python_parity_conform_step conformed)
+add_test(NAME run_conform_step_should_match_python_reference_on_conformed_image COMMAND test_step_conform_parity conformed)
 
-add_test(NAME run_conform_step_should_match_python_reference_on_oblique_image COMMAND test_python_parity_conform_step oblique)
+add_test(NAME run_conform_step_should_match_python_reference_on_oblique_image COMMAND test_step_conform_parity oblique)

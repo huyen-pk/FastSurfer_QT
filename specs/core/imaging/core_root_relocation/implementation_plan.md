@@ -125,7 +125,7 @@ core/
           test_native_reconform_non_conformed.cpp
           test_nifti_converter.cpp
           test_nifti_converter_roundtrip.cpp
-          test_python_parity_conform_step.cpp
+          test_step_conform_parity.cpp
           test_step_conform.cpp
 ```
 

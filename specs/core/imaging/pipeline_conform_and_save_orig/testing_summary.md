@@ -32,7 +32,7 @@ Commands run:
 
 ```bash
 core/build/tests/test_step_conform
-core/build/tests/test_python_parity_conform_step
+core/build/tests/test_step_conform_parity
 ```
 
 Result:
