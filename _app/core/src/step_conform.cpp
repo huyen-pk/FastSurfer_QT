@@ -636,92 +636,6 @@ std::vector<float> mapImageWithoutInterpolation(
     return mappedData;
 }
 
-std::pair<float, float> getScale(const std::vector<float> &data, const float dstMin, const float dstMax)
-{
-    const auto [minIt, maxIt] = std::minmax_element(data.begin(), data.end());
-    const float dataMin = *minIt;
-    const float dataMax = *maxIt;
-
-    if (dataMin == dataMax) {
-        return {dataMin, 1.0F};
-    }
-
-    constexpr int bins = 1000;
-    const double binWidth = static_cast<double>(dataMax - dataMin) / static_cast<double>(bins);
-    if (binWidth <= std::numeric_limits<double>::epsilon()) {
-        return {dataMin, 1.0F};
-    }
-
-    std::vector<int> histogram(bins, 0);
-    std::size_t nonZeroVoxels = 0;
-    for (const float value : data) {
-        if (std::fabs(value) >= 1.0e-15F) {
-            ++nonZeroVoxels;
-        }
-
-        int index = static_cast<int>(std::floor((static_cast<double>(value) - dataMin) / binWidth));
-        index = std::clamp(index, 0, bins - 1);
-        ++histogram[index];
-    }
-
-    std::vector<int> cumulative(bins + 1, 0);
-    for (int index = 0; index < bins; ++index) {
-        cumulative[index + 1] = cumulative[index] + histogram[index];
-    }
-
-    std::vector<float> binEdges(bins + 1, dataMin);
-    for (int index = 0; index <= bins; ++index) {
-        binEdges[index] = static_cast<float>(static_cast<double>(dataMin) + binWidth * index);
-    }
-
-    const int totalVoxels = static_cast<int>(data.size());
-    const int lowerCutoff = 0;
-    int lowerEdgeIndex = 0;
-    for (int index = 0; index < static_cast<int>(cumulative.size()); ++index) {
-        if (cumulative[index] < lowerCutoff) {
-            lowerEdgeIndex = index + 1;
-        }
-    }
-
-    const int upperCutoff = totalVoxels - static_cast<int>((1.0 - 0.999) * static_cast<double>(nonZeroVoxels));
-    int upperEdgeIndex = bins - 1;
-    bool foundUpper = false;
-    for (int index = 0; index < static_cast<int>(cumulative.size()); ++index) {
-        if (cumulative[index] >= upperCutoff) {
-            upperEdgeIndex = std::max(0, index - 2);
-            foundUpper = true;
-            break;
-        }
-    }
-    if (!foundUpper) {
-        upperEdgeIndex = bins - 1;
-    }
-
-    const float srcMin = binEdges[lowerEdgeIndex];
-    const float srcMax = binEdges[upperEdgeIndex];
-    if (srcMin == srcMax) {
-        return {srcMin, 1.0F};
-    }
-
-    return {srcMin, (dstMax - dstMin) / (srcMax - srcMin)};
-}
-
-std::vector<float> scaleAndCrop(
-    const std::vector<float> &mappedData,
-    const float dstMin,
-    const float dstMax,
-    const float srcMin,
-    const float scale)
-{
-    std::vector<float> output(mappedData.size(), 0.0F);
-    for (std::size_t index = 0; index < mappedData.size(); ++index) {
-        const bool isZero = std::fabs(mappedData[index]) <= 1.0e-8F;
-        const float scaled = std::clamp(dstMin + scale * (mappedData[index] - srcMin), dstMin, dstMax);
-        output[index] = isZero ? 0.0F : scaled;
-    }
-    return output;
-}
-
 } // namespace
 
 bool ConformStepService::isAlreadyConformed(const MghImage &image, const ConformStepRequest &request)
@@ -791,8 +705,8 @@ ConformStepResult ConformStepService::run(const ConformStepRequest &request) con
             value = std::clamp(value, 0.0F, 255.0F);
         }
     } else {
-        const auto [srcMin, scale] = getScale(sourceData, 0.0F, 255.0F);
-        mappedData = scaleAndCrop(mappedData, 0.0F, 255.0F, srcMin, scale);
+        const ScalePolicy scalePolicy = computeScalePolicy(sourceData, 0.0F, 255.0F);
+        mappedData = applyScalePolicy(mappedData, 0.0F, 255.0F, scalePolicy);
     }
 
     for (float &value : mappedData) {

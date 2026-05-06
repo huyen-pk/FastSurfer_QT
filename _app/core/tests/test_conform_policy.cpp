@@ -17,6 +17,11 @@ namespace {
 
 // Assertion helpers are provided by TestHelpers.h
 
+void appendRepeatedValues(std::vector<float> &values, const std::size_t count, const float value)
+{
+    values.insert(values.end(), count, value);
+}
+
 fastsurfer::core::MghImage makeImage(
     const std::array<int, 3> &dimensions,
     const std::array<float, 3> &spacing)
@@ -147,6 +152,149 @@ void parse_conform_modes_should_round_trip_supported_values_and_reject_invalid_i
     require(invalidOrientationModeRejected, "Orientation mode parser should reject unsupported input.");
 }
 
+void compute_scale_policy_should_handle_constant_inputs_and_apply_scale_consistently()
+{
+    const fastsurfer::core::ScalePolicy constantPolicy =
+        fastsurfer::core::computeScalePolicy(std::vector<float> {42.0F, 42.0F, 42.0F}, 0.0F, 255.0F);
+    requireNear(constantPolicy.srcMin, 42.0F, test_constants::CONFORM_POLICY_VOXEL_TOLERANCE,
+        "Scale policy should preserve the constant input minimum.");
+    requireNear(constantPolicy.scale, 1.0F, test_constants::CONFORM_POLICY_VOXEL_TOLERANCE,
+        "Scale policy should default to a unit scale for constant inputs.");
+
+    const fastsurfer::core::ScalePolicy policy {10.0F, 2.0F};
+    requireNear(
+        fastsurfer::core::applyScalePolicyValue(0.0F, 0.0F, 255.0F, policy),
+        0.0F,
+        test_constants::CONFORM_POLICY_VOXEL_TOLERANCE,
+        "Scale policy should preserve exact zero values.");
+    requireNear(
+        fastsurfer::core::applyScalePolicyValue(20.0F, 0.0F, 255.0F, policy),
+        20.0F,
+        test_constants::CONFORM_POLICY_VOXEL_TOLERANCE,
+        "Scale policy should shift and scale mapped values.");
+    requireNear(
+        fastsurfer::core::applyScalePolicyValue(200.0F, 0.0F, 255.0F, policy),
+        255.0F,
+        test_constants::CONFORM_POLICY_VOXEL_TOLERANCE,
+        "Scale policy should clamp scaled values to the destination range.");
+
+    const std::vector<float> mappedData {0.0F, 20.0F, 200.0F};
+    const std::vector<float> scaled = fastsurfer::core::applyScalePolicy(mappedData, 0.0F, 255.0F, policy);
+    require(scaled == std::vector<float>({0.0F, 20.0F, 255.0F}),
+        "Vector scale application should match the per-value scale policy behavior.");
+}
+
+void apply_scale_policy_should_respect_zero_epsilon_boundary()
+{
+    const fastsurfer::core::ScalePolicy policy {0.0F, 1.0e9F};
+
+    requireNear(
+        fastsurfer::core::applyScalePolicyValue(test_constants::SCALED_ZERO_EPSILON * 0.5F, 0.0F, 255.0F, policy),
+        0.0F,
+        test_constants::CONFORM_POLICY_VOXEL_TOLERANCE,
+        "Values below the scaled-zero epsilon should be forced to exact zero.");
+    requireNear(
+        fastsurfer::core::applyScalePolicyValue(test_constants::SCALED_ZERO_EPSILON, 0.0F, 255.0F, policy),
+        0.0F,
+        test_constants::CONFORM_POLICY_VOXEL_TOLERANCE,
+        "Values exactly on the scaled-zero epsilon boundary should still be treated as zero.");
+    requireNear(
+        fastsurfer::core::applyScalePolicyValue(test_constants::SCALED_ZERO_EPSILON * 2.0F, 0.0F, 255.0F, policy),
+        20.0F,
+        test_constants::CONFORM_POLICY_VOXEL_TOLERANCE,
+        "Values above the scaled-zero epsilon should participate in normal scaling.");
+}
+
+void compute_scale_policy_should_fallback_to_unit_scale_when_histogram_width_collapses()
+{
+    const std::vector<float> nearlyIdenticalValues {1.0e-20F, 1.5e-20F, 2.0e-20F};
+    const fastsurfer::core::ScalePolicy policy =
+        fastsurfer::core::computeScalePolicy(nearlyIdenticalValues, 0.0F, 255.0F);
+
+    require(
+        policy.srcMin == nearlyIdenticalValues.front(),
+        "When histogram bins collapse numerically, the scale policy should keep the minimum input value.");
+    requireNear(
+        policy.scale,
+        1.0F,
+        test_constants::CONFORM_POLICY_VOXEL_TOLERANCE,
+        "When histogram bins collapse numerically, the scale policy should fall back to unit scaling.");
+}
+
+void compute_scale_policy_should_clip_upper_percentile_outliers()
+{
+    std::vector<float> rampValues;
+    rampValues.reserve(2000);
+    for (int value = 1; value <= 2000; ++value) {
+        rampValues.push_back(static_cast<float>(value));
+    }
+
+    const fastsurfer::core::ScalePolicy policy = fastsurfer::core::computeScalePolicy(rampValues, 0.0F, 255.0F);
+    const float unclippedScale = 255.0F / 1999.0F;
+
+    requireNear(
+        policy.srcMin,
+        1.0F,
+        test_constants::CONFORM_POLICY_VOXEL_TOLERANCE,
+        "The scale policy should preserve the lower bound when the lower cutoff is zero.");
+    require(
+        policy.scale > unclippedScale,
+        "Percentile clipping should increase the foreground scale compared with a full-range min-max mapping.");
+    requireNear(
+        fastsurfer::core::applyScalePolicyValue(1999.0F, 0.0F, 255.0F, policy),
+        255.0F,
+        test_constants::CONFORM_POLICY_VOXEL_TOLERANCE,
+        "A value just below the raw maximum should already saturate once upper-percentile clipping is applied.");
+    require(
+        fastsurfer::core::applyScalePolicyValue(1500.0F, 0.0F, 255.0F, policy) >
+            (1500.0F - 1.0F) * unclippedScale,
+        "Upper-percentile clipping should stretch mid-high intensities above the plain min-max baseline.");
+}
+
+void compute_scale_policy_should_scale_mri_like_distribution_without_artifact_dominance()
+{
+    std::vector<float> sourceData;
+    sourceData.reserve(6602);
+    appendRepeatedValues(sourceData, 3000, 0.0F);
+    appendRepeatedValues(sourceData, 1200, 35.0F);
+    appendRepeatedValues(sourceData, 1200, 85.0F);
+    appendRepeatedValues(sourceData, 1200, 125.0F);
+    appendRepeatedValues(sourceData, 2, 4000.0F);
+
+    const fastsurfer::core::ScalePolicy policy = fastsurfer::core::computeScalePolicy(sourceData, 0.0F, 255.0F);
+    const float csfLikeValue = fastsurfer::core::applyScalePolicyValue(35.0F, 0.0F, 255.0F, policy);
+    const float gmLikeValue = fastsurfer::core::applyScalePolicyValue(85.0F, 0.0F, 255.0F, policy);
+    const float wmLikeValue = fastsurfer::core::applyScalePolicyValue(125.0F, 0.0F, 255.0F, policy);
+    const float artifactValue = fastsurfer::core::applyScalePolicyValue(4000.0F, 0.0F, 255.0F, policy);
+
+    requireNear(
+        policy.srcMin,
+        0.0F,
+        test_constants::CONFORM_POLICY_VOXEL_TOLERANCE,
+        "Background zeros should remain the scale-policy minimum for MRI-like intensity distributions.");
+    requireNear(
+        fastsurfer::core::applyScalePolicyValue(0.0F, 0.0F, 255.0F, policy),
+        0.0F,
+        test_constants::CONFORM_POLICY_VOXEL_TOLERANCE,
+        "Background voxels should stay at exact zero after scaling.");
+    require(
+        csfLikeValue > 0.0F && csfLikeValue < gmLikeValue && gmLikeValue < wmLikeValue,
+        "Foreground tissue clusters should remain ordered after scaling.");
+    require(
+        gmLikeValue > 100.0F,
+        "Sparse bright artifacts should not collapse normal MRI foreground contrast into the bottom of the uint8 range.");
+    requireNear(
+        wmLikeValue,
+        255.0F,
+        test_constants::CONFORM_POLICY_VOXEL_TOLERANCE,
+        "Upper foreground tissue should saturate once the policy clips sparse bright artifacts.");
+    requireNear(
+        artifactValue,
+        255.0F,
+        test_constants::CONFORM_POLICY_VOXEL_TOLERANCE,
+        "Bright artifacts should clamp to the destination maximum.");
+}
+
 void runNamedCase(const std::string &caseName)
 {
     if (caseName == "threshold") {
@@ -171,6 +319,31 @@ void runNamedCase(const std::string &caseName)
 
     if (caseName == "mode-parsing") {
         parse_conform_modes_should_round_trip_supported_values_and_reject_invalid_input();
+        return;
+    }
+
+    if (caseName == "scale-policy") {
+        compute_scale_policy_should_handle_constant_inputs_and_apply_scale_consistently();
+        return;
+    }
+
+    if (caseName == "scale-zero-epsilon") {
+        apply_scale_policy_should_respect_zero_epsilon_boundary();
+        return;
+    }
+
+    if (caseName == "scale-histogram-collapse") {
+        compute_scale_policy_should_fallback_to_unit_scale_when_histogram_width_collapses();
+        return;
+    }
+
+    if (caseName == "scale-upper-outliers") {
+        compute_scale_policy_should_clip_upper_percentile_outliers();
+        return;
+    }
+
+    if (caseName == "scale-mri-like") {
+        compute_scale_policy_should_scale_mri_like_distribution_without_artifact_dominance();
         return;
     }
 

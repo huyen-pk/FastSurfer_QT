@@ -53,11 +53,6 @@ struct SourceOracle {
     InterpolatorType::Pointer interpolator;
 };
 
-struct ScalePolicy {
-    float srcMin {0.0F};
-    float scale {1.0F};
-};
-
 struct ProbeStats {
     double maxPhysicalError {0.0};
     double maxIntensityError {0.0};
@@ -469,71 +464,20 @@ FloatImage3D::Pointer buildGeometryImage(const fastsurfer::core::MghImage &image
     return geometry;
 }
 
-ScalePolicy computeScalePolicy(const std::vector<float> &sourceData)
+std::vector<float> computeRoundedScaledValues(const std::vector<float> &sourceData)
 {
-    const auto [minIt, maxIt] = std::minmax_element(sourceData.begin(), sourceData.end());
-    const float dataMin = *minIt;
-    const float dataMax = *maxIt;
-    if (dataMin == dataMax) {
-        return {dataMin, 1.0F};
+    const fastsurfer::core::ScalePolicy scalePolicy =
+        fastsurfer::core::computeScalePolicy(sourceData, 0.0F, 255.0F);
+    std::vector<float> scaledData = fastsurfer::core::applyScalePolicy(sourceData, 0.0F, 255.0F, scalePolicy);
+    for (float &value : scaledData) {
+        value = std::round(std::clamp(value, 0.0F, 255.0F));
     }
-
-    constexpr int bins = 1000;
-    const double binWidth = static_cast<double>(dataMax - dataMin) / static_cast<double>(bins);
-    if (binWidth <= std::numeric_limits<double>::epsilon()) {
-        return {dataMin, 1.0F};
-    }
-
-    std::vector<int> histogram(bins, 0);
-    std::size_t nonZeroVoxels = 0;
-    for (const float value : sourceData) {
-        if (std::fabs(value) >= test_constants::HISTOGRAM_NON_ZERO_EPSILON) {
-            ++nonZeroVoxels;
-        }
-
-        int index = static_cast<int>(std::floor((static_cast<double>(value) - dataMin) / binWidth));
-        index = std::clamp(index, 0, bins - 1);
-        ++histogram[index];
-    }
-
-    std::vector<int> cumulative(bins + 1, 0);
-    for (int index = 0; index < bins; ++index) {
-        cumulative[index + 1] = cumulative[index] + histogram[index];
-    }
-
-    std::vector<float> binEdges(bins + 1, dataMin);
-    for (int index = 0; index <= bins; ++index) {
-        binEdges[index] = static_cast<float>(static_cast<double>(dataMin) + binWidth * index);
-    }
-
-    const int totalVoxels = static_cast<int>(sourceData.size());
-    const int upperCutoff = totalVoxels - static_cast<int>((1.0 - 0.999) * static_cast<double>(nonZeroVoxels));
-
-    int upperEdgeIndex = bins - 1;
-    for (int index = 0; index < static_cast<int>(cumulative.size()); ++index) {
-        if (cumulative[index] >= upperCutoff) {
-            upperEdgeIndex = std::max(0, index - 2);
-            break;
-        }
-    }
-
-    const float srcMin = binEdges[0];
-    const float srcMax = binEdges[upperEdgeIndex];
-    if (srcMin == srcMax) {
-        return {srcMin, 1.0F};
-    }
-
-    return {srcMin, 255.0F / (srcMax - srcMin)};
+    return scaledData;
 }
 
-float scaleExpectedValue(const float mappedValue, const ScalePolicy &policy)
+float scaleExpectedValue(const float mappedValue, const fastsurfer::core::ScalePolicy &policy)
 {
-    if (std::fabs(mappedValue) <= test_constants::SCALED_ZERO_EPSILON) {
-        return 0.0F;
-    }
-
-    const float scaled = std::clamp(policy.scale * (mappedValue - policy.srcMin), 0.0F, 255.0F);
-    return std::round(scaled);
+    return std::round(fastsurfer::core::applyScalePolicyValue(mappedValue, 0.0F, 255.0F, policy));
 }
 
 std::size_t flattenIndex(const std::array<int, 3> &dimensions, const std::array<int, 3> &index)
@@ -699,7 +643,7 @@ ProbeStats evaluateProbes(
     const FloatImage3D::Pointer &outputGeometry,
     const SourceOracle &sourceOracle,
     const FloatImage3D::Pointer &expectedGeometry,
-    const ScalePolicy &scalePolicy)
+    const fastsurfer::core::ScalePolicy &scalePolicy)
 {
     const auto probes = generateProbeIndices(outputImage.header().dimensions);
     const auto outputData = outputImage.voxelDataAsFloat();
@@ -846,7 +790,7 @@ void verifyOutputCase(
         outputGeometry,
         sourceOracle,
         expectedGeometry,
-        computeScalePolicy(sourceOracle.data));
+        fastsurfer::core::computeScalePolicy(sourceOracle.data, 0.0F, 255.0F));
 
             requireNear(probeStats.maxPhysicalError, 0.0, test_constants::PHYSICAL_POINT_TOLERANCE_MM,
             "The conformed output physical landmarks differ from the affine oracle.");
@@ -934,6 +878,62 @@ void test_subject140_already_conformed()
             "Forced conform changed the Subject140 output dimensions.");
         require(inputImage.rawData() == outputImage.rawData(),
             "Forced conform changed the Subject140 voxel payload even though the input was already conformed.");
+    }
+
+    void test_measure_scaling_errors_by_force_conforming_histogram_scaled_already_standardized_image()
+    {
+        const std::filesystem::path repoRoot = FASTSURFER_REPO_ROOT;
+        const std::filesystem::path fixturePath = repoRoot / "data/Subject140/140_orig.mgz";
+        const std::filesystem::path outputDir = makeFreshDirectory("fastsurfer_core_native_force_histogram_scaled_subject140_test");
+
+        const auto floatInputPath = outputDir / "already_conformed_float_input.mgz";
+        const auto copyPath = outputDir / "copy_orig.mgz";
+        const auto conformedPath = outputDir / "conformed_orig.mgz";
+
+        const auto inputImage = fastsurfer::core::MghImage::load(fixturePath);
+        require(!inputImage.rawData().empty(), "The fixture MGZ appears empty or unreadable: " + fixturePath.string());
+        require(inputImage.isUint8(), "The Subject140 fixture must start as uint8 so the test can isolate histogram scaling from the existing resampling-only shortcut.");
+
+        const std::vector<float> floatSourceData = inputImage.voxelDataAsFloat();
+        auto floatHeader = inputImage.header();
+        floatHeader.type = static_cast<std::int32_t>(fastsurfer::core::MghDataType::Float32);
+        const auto floatInputImage = fastsurfer::core::MghImage::fromVoxelData(
+            floatHeader,
+            floatSourceData,
+            static_cast<std::int32_t>(fastsurfer::core::MghDataType::Float32));
+        floatInputImage.save(floatInputPath);
+
+        fastsurfer::core::ConformStepRequest request;
+        request.inputPath = floatInputPath;
+        request.copyOrigPath = copyPath;
+        request.conformedPath = conformedPath;
+        request.forceConform = true;
+
+        fastsurfer::core::ConformStepService service;
+        const auto result = service.run(request);
+
+        require(result.success,
+            "The forced conform step did not succeed on the already standardized float Subject140 fixture.");
+        require(!result.alreadyConformed,
+            "The float Subject140 input should bypass the already-conformed shortcut and exercise histogram scaling.");
+        require(std::filesystem::exists(copyPath), "The forced histogram-scaling test did not write the copy_orig output.");
+        require(std::filesystem::exists(conformedPath), "The forced histogram-scaling test did not write the conformed output.");
+
+        const SourceOracle sourceOracle = buildSourceOracle(floatInputImage);
+        const auto copyImage = fastsurfer::core::MghImage::load(copyPath);
+        const auto outputImage = fastsurfer::core::MghImage::load(conformedPath);
+
+        assertCopyOrigMatches(copyImage, floatInputImage);
+        verifyOutputCase(floatInputImage, sourceOracle, request, result, outputImage);
+
+        require(floatInputImage.header().dimensions == outputImage.header().dimensions,
+            "Forced histogram scaling changed the Subject140 output dimensions.");
+
+        const std::vector<float> expectedScaledData = computeRoundedScaledValues(floatSourceData);
+        require(outputImage.voxelDataAsFloat() == expectedScaledData,
+            "Forced histogram scaling on the already standardized Subject140 fixture diverged from the shared scale policy.");
+        require(outputImage.rawData() != inputImage.rawData(),
+            "Forced histogram scaling should change the uint8 payload relative to the original already conformed fixture.");
     }
 
     void test_colin27_mgz_cases()
@@ -1069,6 +1069,11 @@ void runNamedCase(const std::string &caseName)
 
     if (caseName == "force-conformed") {
         test_measure_sampling_errors_by_force_conformed_already_standardized_image();
+        return;
+    }
+
+    if (caseName == "force-conformed-scaled") {
+        test_measure_scaling_errors_by_force_conforming_histogram_scaled_already_standardized_image();
         return;
     }
 
