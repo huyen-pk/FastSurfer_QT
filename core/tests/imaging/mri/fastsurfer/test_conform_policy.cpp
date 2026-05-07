@@ -10,7 +10,7 @@
 #include <string>
 #include <vector>
 
-#include "imaging/mri/fastsurfer/mgh_image.h"
+#include "imaging/common/mgh_image.h"
 #include "imaging/mri/fastsurfer/step_conform_request.h"
 
 namespace ohc = OpenHC::imaging::mri::fastsurfer;

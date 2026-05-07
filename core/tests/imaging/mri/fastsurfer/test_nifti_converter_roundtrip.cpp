@@ -7,7 +7,7 @@
 
 #include "TestConstants.h"
 #include "TestHelpers.h"
-#include "imaging/mri/fastsurfer/nifti_converter.h"
+#include "imaging/common/nifti_converter.h"
 
 namespace ohc = OpenHC::imaging::mri::fastsurfer;
 

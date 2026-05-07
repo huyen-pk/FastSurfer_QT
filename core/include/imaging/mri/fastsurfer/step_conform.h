@@ -2,7 +2,7 @@
 
 #include "imaging/mri/fastsurfer/step_conform_request.h"
 #include "imaging/mri/fastsurfer/step_conform_result.h"
-#include "imaging/mri/fastsurfer/mgh_image.h"
+#include "imaging/common/mgh_image.h"
 
 namespace OpenHC::imaging::mri::fastsurfer {
 

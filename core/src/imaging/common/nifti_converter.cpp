@@ -1,4 +1,4 @@
-#include "imaging/mri/fastsurfer/nifti_converter.h"
+#include "imaging/common/nifti_converter.h"
 
 #include <algorithm>
 #include <array>

@@ -10,7 +10,7 @@
 #include "TestHelpers.h"
 #include "imaging/mri/fastsurfer/step_conform_request.h"
 #include "imaging/mri/fastsurfer/step_conform.h"
-#include "imaging/mri/fastsurfer/mgh_image.h"
+#include "imaging/common/mgh_image.h"
 
 namespace ohc = OpenHC::imaging::mri::fastsurfer;
 

@@ -1,4 +1,4 @@
-#include "imaging/mri/fastsurfer/mgh_image.h"
+#include "imaging/common/mgh_image.h"
 
 #include <algorithm>
 #include <array>

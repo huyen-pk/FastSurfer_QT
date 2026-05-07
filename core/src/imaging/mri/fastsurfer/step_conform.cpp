@@ -15,8 +15,8 @@
 
 #include "imaging/mri/fastsurfer/constants.h"
 #include "imaging/mri/fastsurfer/conform_policy.h"
-#include "imaging/mri/fastsurfer/mgh_image.h"
-#include "imaging/mri/fastsurfer/nifti_converter.h"
+#include "imaging/common/mgh_image.h"
+#include "imaging/common/nifti_converter.h"
 
 namespace OpenHC::imaging::mri::fastsurfer {
 namespace {

@@ -30,6 +30,25 @@ C++ library will serve as baseline for implementation in other programming langu
 
 ## Work in progress
 
-Current plan is porting FastSurfer to C++ for MRI processing.
+Current plan is porting FastSurfer to C++ for structural MRI processing.
 
 [Evaluation and benchmark](./evals/fastsurfer_cpp/EVALUATION.md)
+
+
+
+## Roadmap
+### Supported modalities
+- T1, T2, FLAIR
+- fMRI
+- CT
+- XRAY
+- PET
+- EEG
+- Ultrasound
+
+### Supported languages
+- C++
+- Julia
+- Rust
+- Scala
+- C#

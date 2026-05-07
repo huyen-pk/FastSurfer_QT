@@ -24,8 +24,8 @@ include(${ITK_USE_FILE})
 add_library(openhc_imaging_mri_fastsurfer STATIC
     src/imaging/mri/fastsurfer/conform_policy.cpp
     src/imaging/mri/fastsurfer/step_conform.cpp
-    src/imaging/mri/fastsurfer/mgh_image.cpp
-    src/imaging/mri/fastsurfer/nifti_converter.cpp
+    src/imaging/common/mgh_image.cpp
+    src/imaging/common/nifti_converter.cpp
 )
 
 target_include_directories(openhc_imaging_mri_fastsurfer

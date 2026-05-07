@@ -2,7 +2,7 @@
 
 #include <filesystem>
 
-#include "imaging/mri/fastsurfer/mgh_image.h"
+#include "imaging/common/mgh_image.h"
 
 namespace OpenHC::imaging::mri::fastsurfer {
 

@@ -23,8 +23,8 @@
 #include "imaging/mri/fastsurfer/step_conform_result.h"
 #include "imaging/mri/fastsurfer/step_conform.h"
 #include "imaging/mri/fastsurfer/conform_policy.h"
-#include "imaging/mri/fastsurfer/mgh_image.h"
-#include "imaging/mri/fastsurfer/nifti_converter.h"
+#include "imaging/common/mgh_image.h"
+#include "imaging/common/nifti_converter.h"
 
 namespace ohc = OpenHC::imaging::mri::fastsurfer;
 
