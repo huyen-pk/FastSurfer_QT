@@ -21,6 +21,7 @@ namespace {
 
 using RasTransform3 = std::array<std::array<double, 3>, 3>;
 
+// Lowercases file-name comparisons for extension checks.
 std::string normalizeLower(std::string value)
 {
     std::transform(value.begin(), value.end(), value.begin(), [](unsigned char character) {
@@ -29,16 +30,20 @@ std::string normalizeLower(std::string value)
     return value;
 }
 
+// Returns true when value ends with the requested suffix.
 bool endsWith(const std::string &value, const std::string &suffix)
 {
     return value.size() >= suffix.size() &&
            value.compare(value.size() - suffix.size(), suffix.size(), suffix) == 0;
 }
 
+// Maps ITK component types onto the narrower set of MGH storage encodings.
 std::int32_t mapStorageType(const itk::ImageIOBase::IOComponentEnum componentType)
 {
     using IOComponent = itk::ImageIOBase;
 
+    // Collapse the wider set of NIfTI component types into the subset of MGH
+    // storage formats implemented by the native core.
     switch (componentType) {
     case IOComponent::IOComponentEnum::UCHAR:
         return static_cast<std::int32_t>(MghDataType::UChar);
@@ -61,6 +66,7 @@ std::int32_t mapStorageType(const itk::ImageIOBase::IOComponentEnum componentTyp
     }
 }
 
+// Converts ITK image geometry into the MGH header fields used by the native core.
 template <typename TImage>
 MghImage::Header buildHeaderFromImage(const typename TImage::Pointer &image, const std::int32_t storageType)
 {
@@ -90,6 +96,8 @@ MghImage::Header buildHeaderFromImage(const typename TImage::Pointer &image, con
         {{direction[1][0], direction[1][1], direction[1][2]}},
         {{direction[2][0], direction[2][1], direction[2][2]}},
     }};
+    // ITK exposes physical geometry in LPS coordinates, while MGH headers store
+    // direction cosines and centers in RAS coordinates.
     for (int column = 0; column < 3; ++column) {
         for (int row = 0; row < 3; ++row) {
             header.directionCosines[column * 3 + row] =
@@ -102,6 +110,8 @@ MghImage::Header buildHeaderFromImage(const typename TImage::Pointer &image, con
     centerIndex[1] = static_cast<double>(size[1]) / 2.0;
     centerIndex[2] = static_cast<double>(size[2]) / 2.0;
 
+    // Match the MGH center convention by sampling the physical point at the
+    // continuous half-dimension of the ITK image.
     typename TImage::PointType centerPointLps;
     image->TransformContinuousIndexToPhysicalPoint(centerIndex, centerPointLps);
     header.center = {
@@ -112,6 +122,7 @@ MghImage::Header buildHeaderFromImage(const typename TImage::Pointer &image, con
     return header;
 }
 
+// Reads a typed ITK image and converts its voxel buffer into the MghImage model.
 template <typename PixelType>
 MghImage readAsMghImage(const std::filesystem::path &inputPath, const std::int32_t storageType)
 {
@@ -128,6 +139,8 @@ MghImage readAsMghImage(const std::filesystem::path &inputPath, const std::int32
 
     std::vector<float> voxels(voxelCount);
     const PixelType *buffer = image->GetBufferPointer();
+    // Normalize the import path around float samples so the downstream MGH
+    // encoder owns the final storage-type conversion in one place.
     for (std::size_t index = 0; index < voxelCount; ++index) {
         voxels[index] = static_cast<float>(buffer[index]);
     }
@@ -135,6 +148,7 @@ MghImage readAsMghImage(const std::filesystem::path &inputPath, const std::int32
     return MghImage::fromVoxelData(buildHeaderFromImage<ImageType>(image, storageType), voxels, storageType);
 }
 
+// Dispatches to the matching ITK pixel type after image-IO probing.
 MghImage loadTypedImage(const std::filesystem::path &inputPath, const itk::ImageIOBase::IOComponentEnum componentType)
 {
     const std::int32_t storageType = mapStorageType(componentType);
@@ -193,6 +207,8 @@ MghImage NiftiConverter::loadAsMgh(const std::filesystem::path &inputPath)
     imageIO->SetFileName(inputPath.string());
     imageIO->ReadImageInformation();
 
+    // The native conform service currently mirrors only the scalar 3D branch of
+    // the Python pipeline, so reject vector, tensor, and 4D inputs early.
     if (imageIO->GetNumberOfDimensions() != 3) {
         throw std::runtime_error("Native NIfTI conversion currently supports only 3D scalar inputs.");
     }

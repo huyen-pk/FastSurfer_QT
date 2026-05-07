@@ -26,17 +26,19 @@
 #include "imaging/mri/fastsurfer/mgh_image.h"
 #include "imaging/mri/fastsurfer/nifti_converter.h"
 
+namespace ohc = OpenHC::imaging::mri::fastsurfer;
+
 namespace {
 
 std::string resolveRequestedOrientationCode(
-    const OpenHC::imaging::mri::fastsurfer::OrientationMode requestedOrientation,
+    const ohc::OrientationMode requestedOrientation,
     const std::string &sourceOrientation)
 {
-    if (requestedOrientation == OpenHC::imaging::mri::fastsurfer::OrientationMode::Native) {
+    if (requestedOrientation == ohc::OrientationMode::Native) {
         return sourceOrientation;
     }
 
-    std::string orientation = OpenHC::imaging::mri::fastsurfer::to_string(requestedOrientation);
+    std::string orientation = ohc::to_string(requestedOrientation);
     std::transform(orientation.begin(), orientation.end(), orientation.begin(), [](unsigned char character) {
         return static_cast<char>(std::toupper(character));
     });
@@ -48,18 +50,27 @@ using ImportFilter = itk::ImportImageFilter<float, 3>;
 using InterpolatorType = itk::LinearInterpolateImageFunction<FloatImage3D, double>;
 
 struct SourceOracle {
+    // Source voxel buffer exposed as float samples.
     std::vector<float> data;
+    // ITK image carrying the source geometry.
     FloatImage3D::Pointer image;
+    // Interpolator used by the probe-based geometry oracle.
     InterpolatorType::Pointer interpolator;
 };
 
 struct ProbeStats {
+    // Largest physical-point deviation in millimeters across probes.
     double maxPhysicalError {0.0};
+    // Largest absolute uint8 intensity error across probes.
     double maxIntensityError {0.0};
     // p95 of absolute uint8 intensity error across sampled probes; units are grayscale levels.
     double percentile95IntensityError {0.0};
 };
 
+// Creates a clean temporary directory for one conform-test invocation.
+// Parameters:
+// - name: Directory suffix used to isolate this test run.
+// Returns the recreated directory path.
 std::filesystem::path makeFreshDirectory(const std::string &name)
 {
     if (const char *envTmp = std::getenv("FASTSURFER_TEST_TMPDIR"); envTmp != nullptr && envTmp[0] != '\0') {
@@ -77,7 +88,11 @@ std::filesystem::path makeFreshDirectory(const std::string &name)
 
 // assertion helpers are provided by TestHelpers.h
 
-Eigen::Matrix4d toEigenMatrix(const OpenHC::imaging::mri::fastsurfer::Matrix4 &matrix)
+// Converts the native affine type into Eigen for matrix-based comparisons.
+// Parameters:
+// - matrix: Native 4x4 affine matrix.
+// Returns the same matrix as Eigen::Matrix4d.
+Eigen::Matrix4d toEigenMatrix(const ohc::Matrix4 &matrix)
 {
     Eigen::Matrix4d result = Eigen::Matrix4d::Zero();
     for (int row = 0; row < 4; ++row) {
@@ -88,6 +103,10 @@ Eigen::Matrix4d toEigenMatrix(const OpenHC::imaging::mri::fastsurfer::Matrix4 &m
     return result;
 }
 
+// Converts an ITK direction matrix into Eigen form.
+// Parameters:
+// - direction: ITK direction matrix to convert.
+// Returns the same matrix as Eigen::Matrix3d.
 Eigen::Matrix3d toDirectionMatrix(const FloatImage3D::DirectionType &direction)
 {
     Eigen::Matrix3d result = Eigen::Matrix3d::Zero();
@@ -100,6 +119,12 @@ Eigen::Matrix3d toDirectionMatrix(const FloatImage3D::DirectionType &direction)
 }
 
 template <typename DerivedActual, typename DerivedExpected>
+// Throws when two Eigen matrices differ by more than tolerance.
+// Parameters:
+// - actual: Observed matrix.
+// - expected: Expected matrix.
+// - tolerance: Maximum allowed absolute coefficient error.
+// - message: Failure message to surface when the assertion fails.
 void assertMatrixClose(
     const Eigen::MatrixBase<DerivedActual> &actual,
     const Eigen::MatrixBase<DerivedExpected> &expected,
@@ -112,6 +137,10 @@ void assertMatrixClose(
     }
 }
 
+// Uppercases orientation codes for case-insensitive comparisons.
+// Parameters:
+// - value: Orientation string to normalize.
+// Returns the uppercased orientation string.
 std::string normalizeUpper(std::string value)
 {
     std::transform(value.begin(), value.end(), value.begin(), [](unsigned char character) {
@@ -120,6 +149,10 @@ std::string normalizeUpper(std::string value)
     return value;
 }
 
+// Maps an orientation letter to its anatomical axis family.
+// Parameters:
+// - axisCode: Orientation letter such as L, R, A, P, I, or S.
+// Returns 0 for left-right, 1 for anterior-posterior, and 2 for inferior-superior.
 int axisGroup(const char axisCode)
 {
     switch (static_cast<char>(std::toupper(static_cast<unsigned char>(axisCode)))) {
@@ -137,6 +170,10 @@ int axisGroup(const char axisCode)
     }
 }
 
+// Builds an ITK direction matrix from a three-letter orientation code.
+// Parameters:
+// - orientation: Orientation code such as LIA or RAS.
+// Returns the matching direction matrix.
 FloatImage3D::DirectionType directionFromOrientation(const std::string &orientation)
 {
     FloatImage3D::DirectionType direction;
@@ -176,6 +213,12 @@ FloatImage3D::DirectionType directionFromOrientation(const std::string &orientat
     return direction;
 }
 
+// Reorders native target dimensions to match a requested output orientation.
+// Parameters:
+// - nativeTargetDimensions: Dimensions before orientation remapping.
+// - sourceOrientation: Source orientation code.
+// - requestedOrientation: Requested output orientation code.
+// Returns the target dimensions in requested orientation order.
 std::array<int, 3> targetDimensionsForOrientation(
     const std::array<int, 3> &nativeTargetDimensions,
     const std::string &sourceOrientation,
@@ -210,6 +253,10 @@ std::array<int, 3> targetDimensionsForOrientation(
     return targetDimensions;
 }
 
+// Returns the voxel-center coordinates for a lattice of the given dimensions.
+// Parameters:
+// - dimensions: Lattice dimensions along x, y, and z.
+// Returns the homogeneous center coordinate.
 Eigen::Vector4d voxelCenter(const std::array<int, 3> &dimensions)
 {
     return {
@@ -220,7 +267,11 @@ Eigen::Vector4d voxelCenter(const std::array<int, 3> &dimensions)
     };
 }
 
-FloatImage3D::DirectionType itkDirectionFromHeader(const OpenHC::imaging::mri::fastsurfer::MghImage::Header &header)
+// Converts MGH header direction cosines into ITK direction form.
+// Parameters:
+// - header: MGH header carrying direction cosines.
+// Returns the matching ITK direction matrix.
+FloatImage3D::DirectionType itkDirectionFromHeader(const ohc::MghImage::Header &header)
 {
     FloatImage3D::DirectionType direction;
     direction.SetIdentity();
@@ -232,7 +283,11 @@ FloatImage3D::DirectionType itkDirectionFromHeader(const OpenHC::imaging::mri::f
     return direction;
 }
 
-FloatImage3D::SpacingType itkSpacingFromHeader(const OpenHC::imaging::mri::fastsurfer::MghImage::Header &header)
+// Converts MGH spacing metadata into ITK spacing form.
+// Parameters:
+// - header: MGH header carrying voxel spacing.
+// Returns the matching ITK spacing value.
+FloatImage3D::SpacingType itkSpacingFromHeader(const ohc::MghImage::Header &header)
 {
     FloatImage3D::SpacingType spacing;
     for (unsigned int axis = 0; axis < 3; ++axis) {
@@ -241,6 +296,10 @@ FloatImage3D::SpacingType itkSpacingFromHeader(const OpenHC::imaging::mri::fasts
     return spacing;
 }
 
+// Extracts an ITK origin from an Eigen affine matrix.
+// Parameters:
+// - affine: Homogeneous affine matrix whose translation defines the origin.
+// Returns the corresponding ITK point.
 FloatImage3D::PointType itkOriginFromAffine(const Eigen::Matrix4d &affine)
 {
     FloatImage3D::PointType origin;
@@ -250,16 +309,28 @@ FloatImage3D::PointType itkOriginFromAffine(const Eigen::Matrix4d &affine)
     return origin;
 }
 
+// Converts an ITK point into Eigen vector form.
+// Parameters:
+// - point: ITK point to convert.
+// Returns the same point as Eigen::Vector3d.
 Eigen::Vector3d toEigenVector(const FloatImage3D::PointType &point)
 {
     return {point[0], point[1], point[2]};
 }
 
+// Converts ITK spacing into Eigen vector form.
+// Parameters:
+// - spacing: ITK spacing to convert.
+// Returns the same spacing as Eigen::Vector3d.
 Eigen::Vector3d toEigenVector(const FloatImage3D::SpacingType &spacing)
 {
     return {spacing[0], spacing[1], spacing[2]};
 }
 
+// Builds an ITK image region from integer dimensions.
+// Parameters:
+// - dimensions: Region size along x, y, and z.
+// Returns the matching ITK region.
 FloatImage3D::RegionType itkRegionFromDimensions(const std::array<int, 3> &dimensions)
 {
     FloatImage3D::RegionType region;
@@ -274,6 +345,10 @@ FloatImage3D::RegionType itkRegionFromDimensions(const std::array<int, 3> &dimen
     return region;
 }
 
+// Reads the spatial dimensions from an ITK geometry image.
+// Parameters:
+// - geometry: ITK image whose region defines the dimensions.
+// Returns the x, y, and z dimensions.
 std::array<int, 3> dimensionsFromGeometry(const FloatImage3D::Pointer &geometry)
 {
     const auto size = geometry->GetLargestPossibleRegion().GetSize();
@@ -284,6 +359,10 @@ std::array<int, 3> dimensionsFromGeometry(const FloatImage3D::Pointer &geometry)
     };
 }
 
+// Computes the continuous center index used by the physical-center oracle.
+// Parameters:
+// - dimensions: Lattice dimensions along x, y, and z.
+// Returns the half-dimension index in ITK continuous-index form.
 itk::ContinuousIndex<double, 3> continuousCenterIndex(const std::array<int, 3> &dimensions)
 {
     itk::ContinuousIndex<double, 3> centerIndex;
@@ -293,6 +372,11 @@ itk::ContinuousIndex<double, 3> continuousCenterIndex(const std::array<int, 3> &
     return centerIndex;
 }
 
+// Computes the physical center of an ITK geometry image.
+// Parameters:
+// - geometry: Geometry image used for the transform.
+// - dimensions: Dimensions whose center should be evaluated.
+// Returns the physical center point.
 FloatImage3D::PointType physicalCenter(
     const FloatImage3D::Pointer &geometry,
     const std::array<int, 3> &dimensions)
@@ -302,6 +386,13 @@ FloatImage3D::PointType physicalCenter(
     return center;
 }
 
+// Reconstructs an ITK origin from a target center, direction, and spacing.
+// Parameters:
+// - direction: Target direction matrix.
+// - spacing: Target voxel spacing.
+// - dimensions: Target lattice dimensions.
+// - center: Desired physical center point.
+// Returns the origin that yields the supplied center.
 FloatImage3D::PointType computeOriginFromCenter(
     const FloatImage3D::DirectionType &direction,
     const FloatImage3D::SpacingType &spacing,
@@ -320,11 +411,22 @@ FloatImage3D::PointType computeOriginFromCenter(
     return origin;
 }
 
+// Returns true when two floating-point values are within epsilon.
+// Parameters:
+// - left: First value to compare.
+// - right: Second value to compare.
+// - epsilon: Maximum allowed absolute difference.
 bool isClose(const double left, const double right, const double epsilon)
 {
     return std::fabs(left - right) <= epsilon;
 }
 
+// Builds an affine matrix from ITK direction, spacing, and origin values.
+// Parameters:
+// - direction: Direction matrix of the geometry.
+// - spacing: Spacing vector of the geometry.
+// - origin: Physical origin of the geometry.
+// Returns the corresponding homogeneous affine matrix.
 Eigen::Matrix4d affineFromGeometry(
     const FloatImage3D::DirectionType &direction,
     const FloatImage3D::SpacingType &spacing,
@@ -343,6 +445,9 @@ Eigen::Matrix4d affineFromGeometry(
     return affine;
 }
 
+// Returns true when the transform includes a non-axis-aligned rotation component.
+// Parameters:
+// - vox2vox: Voxel-to-voxel affine under test.
 bool rotationRequiresInterpolation(const Eigen::Matrix4d &vox2vox)
 {
     for (int row = 0; row < 3; ++row) {
@@ -357,6 +462,11 @@ bool rotationRequiresInterpolation(const Eigen::Matrix4d &vox2vox)
     return false;
 }
 
+// Combines direction and spacing into the affine linear component.
+// Parameters:
+// - direction: Direction matrix.
+// - spacing: Voxel spacing.
+// Returns the scaled 3x3 linear component.
 Eigen::Matrix3d scaledDirectionMatrix(
     const FloatImage3D::DirectionType &direction,
     const FloatImage3D::SpacingType &spacing)
@@ -369,6 +479,12 @@ Eigen::Matrix3d scaledDirectionMatrix(
     return linear;
 }
 
+// Computes the voxel-space translation that aligns source and target centers.
+// Parameters:
+// - vox2voxLinear: Linear voxel-to-voxel transform.
+// - sourceDimensions: Source lattice dimensions.
+// - targetDimensions: Target lattice dimensions.
+// Returns the translation vector that aligns the centers.
 Eigen::Vector3d translationToFixCenter(
     const Eigen::Matrix3d &vox2voxLinear,
     const std::array<int, 3> &sourceDimensions,
@@ -387,14 +503,22 @@ Eigen::Vector3d translationToFixCenter(
     return sourceCenter - vox2voxLinear * targetCenter;
 }
 
+// Builds the expected output geometry used as the merged conform oracle.
+// Parameters:
+// - sourceImage: Source image being conformed.
+// - sourceOracle: Source ITK representation and interpolator.
+// - request: Conform request under test.
+// - targetVoxelSize: Chosen output voxel size.
+// - nativeTargetDimensions: Native target dimensions before orientation remapping.
+// Returns an allocated ITK image carrying the expected output geometry.
 FloatImage3D::Pointer buildExpectedGeometry(
-    const OpenHC::imaging::mri::fastsurfer::MghImage &sourceImage,
+    const ohc::MghImage &sourceImage,
     const SourceOracle &sourceOracle,
-    const OpenHC::imaging::mri::fastsurfer::ConformStepRequest &request,
+    const ohc::ConformStepRequest &request,
     const float targetVoxelSize,
     const std::array<int, 3> &nativeTargetDimensions)
 {
-    const bool useNativeOrientation = request.orientation == OpenHC::imaging::mri::fastsurfer::OrientationMode::Native;
+    const bool useNativeOrientation = request.orientation == ohc::OrientationMode::Native;
     const std::string targetOrientation = resolveRequestedOrientationCode(request.orientation, sourceImage.orientationCode());
     const auto targetDimensions = useNativeOrientation
         ? nativeTargetDimensions
@@ -434,7 +558,11 @@ FloatImage3D::Pointer buildExpectedGeometry(
     return expectedGeometry;
 }
 
-SourceOracle buildSourceOracle(const OpenHC::imaging::mri::fastsurfer::MghImage &image)
+// Builds the ITK-backed source oracle used by geometry and interpolation checks.
+// Parameters:
+// - image: Source image to expose through ITK.
+// Returns the source voxel buffer, ITK image, and interpolator.
+SourceOracle buildSourceOracle(const ohc::MghImage &image)
 {
     SourceOracle oracle;
     oracle.data = image.voxelDataAsFloat();
@@ -453,7 +581,11 @@ SourceOracle buildSourceOracle(const OpenHC::imaging::mri::fastsurfer::MghImage 
     return oracle;
 }
 
-FloatImage3D::Pointer buildGeometryImage(const OpenHC::imaging::mri::fastsurfer::MghImage &image)
+// Builds a geometry-only ITK image from an MGH image.
+// Parameters:
+// - image: Image whose geometry should be mirrored.
+// Returns an allocated ITK image carrying the same geometry.
+FloatImage3D::Pointer buildGeometryImage(const ohc::MghImage &image)
 {
     auto geometry = FloatImage3D::New();
     geometry->SetRegions(itkRegionFromDimensions(image.header().dimensions));
@@ -464,22 +596,35 @@ FloatImage3D::Pointer buildGeometryImage(const OpenHC::imaging::mri::fastsurfer:
     return geometry;
 }
 
+// Applies the shared scale policy and uint8 rounding used by the conform output.
+// Parameters:
+// - sourceData: Input data to scale and round.
+// Returns the rounded uint8-domain values as floats.
 std::vector<float> computeRoundedScaledValues(const std::vector<float> &sourceData)
 {
-    const OpenHC::imaging::mri::fastsurfer::ScalePolicy scalePolicy =
-        OpenHC::imaging::mri::fastsurfer::computeScalePolicy(sourceData, 0.0F, 255.0F);
-    std::vector<float> scaledData = OpenHC::imaging::mri::fastsurfer::applyScalePolicy(sourceData, 0.0F, 255.0F, scalePolicy);
+    const ohc::ScalePolicy scalePolicy = ohc::computeScalePolicy(sourceData, 0.0F, 255.0F);
+    std::vector<float> scaledData = ohc::applyScalePolicy(sourceData, 0.0F, 255.0F, scalePolicy);
     for (float &value : scaledData) {
         value = std::round(std::clamp(value, 0.0F, 255.0F));
     }
     return scaledData;
 }
 
-float scaleExpectedValue(const float mappedValue, const OpenHC::imaging::mri::fastsurfer::ScalePolicy &policy)
+// Evaluates the expected scaled value for one interpolated source sample.
+// Parameters:
+// - mappedValue: Interpolated source intensity.
+// - policy: Scale policy used by the conform output.
+// Returns the rounded uint8-domain expected value.
+float scaleExpectedValue(const float mappedValue, const ohc::ScalePolicy &policy)
 {
-    return std::round(OpenHC::imaging::mri::fastsurfer::applyScalePolicyValue(mappedValue, 0.0F, 255.0F, policy));
+    return std::round(ohc::applyScalePolicyValue(mappedValue, 0.0F, 255.0F, policy));
 }
 
+// Flattens 3D voxel coordinates into a row-major linear index.
+// Parameters:
+// - dimensions: Lattice dimensions.
+// - index: x, y, z voxel coordinates.
+// Returns the linear buffer index.
 std::size_t flattenIndex(const std::array<int, 3> &dimensions, const std::array<int, 3> &index)
 {
     return (static_cast<std::size_t>(index[2]) * static_cast<std::size_t>(dimensions[1]) +
@@ -488,11 +633,20 @@ std::size_t flattenIndex(const std::array<int, 3> &dimensions, const std::array<
            static_cast<std::size_t>(index[0]);
 }
 
+// Clamps a probe coordinate into the valid index range for one axis.
+// Parameters:
+// - dimension: Axis length.
+// - index: Candidate probe index.
+// Returns the clamped index.
 int clampProbeIndex(const int dimension, const int index)
 {
     return std::clamp(index, 0, std::max(0, dimension - 1));
 }
 
+// Generates boundary-focused probe samples for one axis.
+// Parameters:
+// - dimension: Axis length.
+// Returns sorted unique probe indices along that axis.
 std::vector<int> axisProbeSamples(const int dimension)
 {
     if (dimension <= 0) {
@@ -513,6 +667,11 @@ std::vector<int> axisProbeSamples(const int dimension)
     return samples;
 }
 
+// Generates evenly stratified probe samples for one axis.
+// Parameters:
+// - dimension: Axis length.
+// - binCount: Requested number of sampling bins.
+// Returns sorted unique probe indices along that axis.
 std::vector<int> stratifiedAxisProbeSamples(
     const int dimension,
     const int binCount = test_constants::STRATIFIED_PROBE_BIN_COUNT)
@@ -535,6 +694,12 @@ std::vector<int> stratifiedAxisProbeSamples(
     return samples;
 }
 
+// Returns the inclusive bounds of one jittered-probe bin.
+// Parameters:
+// - dimension: Axis length.
+// - bin: Bin index to evaluate.
+// - binCount: Total number of bins.
+// Returns the inclusive start and end indices for that bin.
 std::array<int, 2> jitteredBinBounds(const int dimension, const int bin, const int binCount)
 {
     const int start = (bin * dimension) / binCount;
@@ -543,6 +708,11 @@ std::array<int, 2> jitteredBinBounds(const int dimension, const int bin, const i
     return {start, end};
 }
 
+// Generates one jittered probe per bin across the 3D lattice.
+// Parameters:
+// - dimensions: Lattice dimensions.
+// - binCount: Requested bin count per axis.
+// Returns sorted unique jittered probe indices.
 std::vector<std::array<int, 3>> generateJitteredProbeIndices(
     const std::array<int, 3> &dimensions,
     const int binCount = test_constants::JITTERED_PROBE_BIN_COUNT)
@@ -584,6 +754,12 @@ std::vector<std::array<int, 3>> generateJitteredProbeIndices(
     return probes;
 }
 
+// Appends the Cartesian product of axis probes to the destination list.
+// Parameters:
+// - xs: Probe indices along x.
+// - ys: Probe indices along y.
+// - zs: Probe indices along z.
+// - probes: Destination probe list to extend.
 void appendCartesianProbes(
     const std::vector<int> &xs,
     const std::vector<int> &ys,
@@ -599,6 +775,10 @@ void appendCartesianProbes(
     }
 }
 
+// Builds the full probe set used by the merged conform oracle.
+// Parameters:
+// - dimensions: Output lattice dimensions.
+// Returns sorted unique probe coordinates across boundary, stratified, and jittered samples.
 std::vector<std::array<int, 3>> generateProbeIndices(const std::array<int, 3> &dimensions)
 {
     const auto boundaryXs = axisProbeSamples(dimensions[0]);
@@ -624,6 +804,10 @@ std::vector<std::array<int, 3>> generateProbeIndices(const std::array<int, 3> &d
     return probes;
 }
 
+// Computes the 95th percentile of a vector of absolute errors.
+// Parameters:
+// - values: Error samples to summarize.
+// Returns the 95th-percentile sample value.
 double percentile95(std::vector<double> values)
 {
     if (values.empty()) {
@@ -638,12 +822,20 @@ double percentile95(std::vector<double> values)
     return values[std::min(index, values.size() - 1U)];
 }
 
+// Evaluates physical and intensity probe errors against the merged conform oracle.
+// Parameters:
+// - outputImage: Written conform output under test.
+// - outputGeometry: ITK geometry derived from the output image.
+// - sourceOracle: ITK-backed source image and interpolator.
+// - expectedGeometry: Expected output geometry from the oracle.
+// - scalePolicy: Scale policy used to compute expected intensities.
+// Returns aggregated probe error statistics.
 ProbeStats evaluateProbes(
-    const OpenHC::imaging::mri::fastsurfer::MghImage &outputImage,
+    const ohc::MghImage &outputImage,
     const FloatImage3D::Pointer &outputGeometry,
     const SourceOracle &sourceOracle,
     const FloatImage3D::Pointer &expectedGeometry,
-    const OpenHC::imaging::mri::fastsurfer::ScalePolicy &scalePolicy)
+    const ohc::ScalePolicy &scalePolicy)
 {
     const auto probes = generateProbeIndices(outputImage.header().dimensions);
     const auto outputData = outputImage.voxelDataAsFloat();
@@ -688,9 +880,13 @@ ProbeStats evaluateProbes(
     return stats;
 }
 
+// Verifies that the copy-orig output matches the expected input image exactly.
+// Parameters:
+// - copyImage: Copy-orig image produced by the service.
+// - expectedCopy: Image that should have been copied.
 void assertCopyOrigMatches(
-    const OpenHC::imaging::mri::fastsurfer::MghImage &copyImage,
-    const OpenHC::imaging::mri::fastsurfer::MghImage &expectedCopy)
+    const ohc::MghImage &copyImage,
+    const ohc::MghImage &expectedCopy)
 {
     require(copyImage.rawData() == expectedCopy.rawData(),
             "The copy-orig output differs from the direct NIfTI-to-MGZ conversion payload.");
@@ -701,16 +897,23 @@ void assertCopyOrigMatches(
         "The copy-orig MGZ affine differs from the direct NIfTI conversion affine.");
 }
 
+// Verifies geometry-related invariants for one conform output.
+// Parameters:
+// - sourceImage: Source image provided to the service.
+// - sourceOracle: ITK-backed oracle built from the source image.
+// - request: Conform request under test.
+// - result: Service result metadata.
+// - outputImage: Written conformed output image.
 void verifyOutputGeometry(
-    const OpenHC::imaging::mri::fastsurfer::MghImage &sourceImage,
+    const ohc::MghImage &sourceImage,
     const SourceOracle &sourceOracle,
-    const OpenHC::imaging::mri::fastsurfer::ConformStepRequest &request,
-    const OpenHC::imaging::mri::fastsurfer::ConformStepResult &result,
-    const OpenHC::imaging::mri::fastsurfer::MghImage &outputImage)
+    const ohc::ConformStepRequest &request,
+    const ohc::ConformStepResult &result,
+    const ohc::MghImage &outputImage)
 {
-    const float targetVoxelSize = OpenHC::imaging::mri::fastsurfer::computeTargetVoxelSize(sourceImage, request);
+    const float targetVoxelSize = ohc::computeTargetVoxelSize(sourceImage, request);
     const auto nativeTargetDimensions =
-        OpenHC::imaging::mri::fastsurfer::computeNativeTargetDimensions(sourceImage, targetVoxelSize, request.imageSizeMode);
+        ohc::computeNativeTargetDimensions(sourceImage, targetVoxelSize, request.imageSizeMode);
     const std::string expectedOrientation = resolveRequestedOrientationCode(request.orientation, sourceImage.orientationCode());
     const auto expectedGeometry =
         buildExpectedGeometry(sourceImage, sourceOracle, request, targetVoxelSize, nativeTargetDimensions);
@@ -769,18 +972,25 @@ void verifyOutputGeometry(
         "The conformed output center differs from the expected conform geometry.");
 }
 
+// Verifies both geometry and probe-sampled intensities for one conform output.
+// Parameters:
+// - sourceImage: Source image provided to the service.
+// - sourceOracle: ITK-backed oracle built from the source image.
+// - request: Conform request under test.
+// - result: Service result metadata.
+// - outputImage: Written conformed output image.
 void verifyOutputCase(
-    const OpenHC::imaging::mri::fastsurfer::MghImage &sourceImage,
+    const ohc::MghImage &sourceImage,
     const SourceOracle &sourceOracle,
-    const OpenHC::imaging::mri::fastsurfer::ConformStepRequest &request,
-    const OpenHC::imaging::mri::fastsurfer::ConformStepResult &result,
-    const OpenHC::imaging::mri::fastsurfer::MghImage &outputImage)
+    const ohc::ConformStepRequest &request,
+    const ohc::ConformStepResult &result,
+    const ohc::MghImage &outputImage)
 {
     verifyOutputGeometry(sourceImage, sourceOracle, request, result, outputImage);
 
-    const float targetVoxelSize = OpenHC::imaging::mri::fastsurfer::computeTargetVoxelSize(sourceImage, request);
+    const float targetVoxelSize = ohc::computeTargetVoxelSize(sourceImage, request);
     const auto nativeTargetDimensions =
-        OpenHC::imaging::mri::fastsurfer::computeNativeTargetDimensions(sourceImage, targetVoxelSize, request.imageSizeMode);
+        ohc::computeNativeTargetDimensions(sourceImage, targetVoxelSize, request.imageSizeMode);
     const auto expectedGeometry =
         buildExpectedGeometry(sourceImage, sourceOracle, request, targetVoxelSize, nativeTargetDimensions);
     const auto outputGeometry = buildGeometryImage(outputImage);
@@ -790,7 +1000,7 @@ void verifyOutputCase(
         outputGeometry,
         sourceOracle,
         expectedGeometry,
-        OpenHC::imaging::mri::fastsurfer::computeScalePolicy(sourceOracle.data, 0.0F, 255.0F));
+        ohc::computeScalePolicy(sourceOracle.data, 0.0F, 255.0F));
 
             requireNear(probeStats.maxPhysicalError, 0.0, test_constants::PHYSICAL_POINT_TOLERANCE_MM,
             "The conformed output physical landmarks differ from the affine oracle.");
@@ -800,26 +1010,27 @@ void verifyOutputCase(
             "The conformed output exceeded the 95th-percentile ITK-interpolated probe intensity error tolerance.");
 }
 
+// Verifies the already-conformed fast path on the Subject140 MGZ fixture.
 void test_subject140_already_conformed()
 {
-    const std::filesystem::path repoRoot = FASTSURFER_REPO_ROOT;
+    const std::filesystem::path repoRoot = OPENHC_REPO_ROOT;
     const std::filesystem::path fixturePath = repoRoot / "data/Subject140/140_orig.mgz";
     const std::filesystem::path outputDir = makeFreshDirectory("openhc_imaging_mri_fastsurfer_native_conform_step_test");
 
     const auto copyPath = outputDir / "copy_orig.mgz";
     const auto conformedPath = outputDir / "conformed_orig.mgz";
 
-    const auto inputImage = OpenHC::imaging::mri::fastsurfer::MghImage::load(fixturePath);
+    const auto inputImage = ohc::MghImage::load(fixturePath);
     require(!inputImage.rawData().empty(), "The fixture MGZ appears empty or unreadable: " + fixturePath.string());
     require(inputImage.orientationCode().size() == 3 && inputImage.orientationCode().find('?') == std::string::npos,
         "The fixture orientation code could not be derived from the MGZ header: '" + inputImage.orientationCode() + "'.");
 
-    OpenHC::imaging::mri::fastsurfer::ConformStepRequest request;
+    ohc::ConformStepRequest request;
     request.inputPath = fixturePath;
     request.copyOrigPath = copyPath;
     request.conformedPath = conformedPath;
 
-    OpenHC::imaging::mri::fastsurfer::ConformStepService service;
+    ohc::ConformStepService service;
     const auto result = service.run(request);
 
     require(result.success, "The native conform step did not succeed.");
@@ -828,8 +1039,8 @@ void test_subject140_already_conformed()
     require(std::filesystem::exists(conformedPath), "The native conform step did not write the conformed output.");
 
         const SourceOracle sourceOracle = buildSourceOracle(inputImage);
-        const auto copyImage = OpenHC::imaging::mri::fastsurfer::MghImage::load(copyPath);
-    const auto outputImage = OpenHC::imaging::mri::fastsurfer::MghImage::load(conformedPath);
+        const auto copyImage = ohc::MghImage::load(copyPath);
+    const auto outputImage = ohc::MghImage::load(conformedPath);
 
         assertCopyOrigMatches(copyImage, inputImage);
             verifyOutputGeometry(inputImage, sourceOracle, request, result, outputImage);
@@ -840,25 +1051,26 @@ void test_subject140_already_conformed()
             "The conformed output voxel payload differs from the input fixture.");
 }
 
-    void test_measure_sampling_errors_by_force_conformed_already_standardized_image()
-    {
-        const std::filesystem::path repoRoot = FASTSURFER_REPO_ROOT;
+// Verifies that forcing reconform on an already standardized uint8 image does not introduce sampling changes.
+void test_measure_sampling_errors_by_force_conformed_already_standardized_image()
+{
+        const std::filesystem::path repoRoot = OPENHC_REPO_ROOT;
         const std::filesystem::path fixturePath = repoRoot / "data/Subject140/140_orig.mgz";
         const std::filesystem::path outputDir = makeFreshDirectory("openhc_imaging_mri_fastsurfer_native_force_conform_subject140_test");
 
         const auto copyPath = outputDir / "copy_orig.mgz";
         const auto conformedPath = outputDir / "conformed_orig.mgz";
 
-        const auto inputImage = OpenHC::imaging::mri::fastsurfer::MghImage::load(fixturePath);
+        const auto inputImage = ohc::MghImage::load(fixturePath);
         require(!inputImage.rawData().empty(), "The fixture MGZ appears empty or unreadable: " + fixturePath.string());
 
-        OpenHC::imaging::mri::fastsurfer::ConformStepRequest request;
+        ohc::ConformStepRequest request;
         request.inputPath = fixturePath;
         request.copyOrigPath = copyPath;
         request.conformedPath = conformedPath;
         request.forceConform = true;
 
-        OpenHC::imaging::mri::fastsurfer::ConformStepService service;
+        ohc::ConformStepService service;
         const auto result = service.run(request);
 
         require(result.success, "The forced conform step did not succeed on the already conformed Subject140 fixture.");
@@ -868,8 +1080,8 @@ void test_subject140_already_conformed()
         require(std::filesystem::exists(conformedPath), "The forced conform step did not write the conformed output.");
 
         const SourceOracle sourceOracle = buildSourceOracle(inputImage);
-        const auto copyImage = OpenHC::imaging::mri::fastsurfer::MghImage::load(copyPath);
-        const auto outputImage = OpenHC::imaging::mri::fastsurfer::MghImage::load(conformedPath);
+        const auto copyImage = ohc::MghImage::load(copyPath);
+        const auto outputImage = ohc::MghImage::load(conformedPath);
 
         assertCopyOrigMatches(copyImage, inputImage);
         verifyOutputGeometry(inputImage, sourceOracle, request, result, outputImage);
@@ -878,11 +1090,12 @@ void test_subject140_already_conformed()
             "Forced conform changed the Subject140 output dimensions.");
         require(inputImage.rawData() == outputImage.rawData(),
             "Forced conform changed the Subject140 voxel payload even though the input was already conformed.");
-    }
+}
 
-    void test_measure_scaling_errors_by_force_conforming_histogram_scaled_already_standardized_image()
-    {
-        const std::filesystem::path repoRoot = FASTSURFER_REPO_ROOT;
+// Verifies the histogram-scaling path on an already standardized float image.
+void test_measure_scaling_errors_by_force_conforming_histogram_scaled_already_standardized_image()
+{
+        const std::filesystem::path repoRoot = OPENHC_REPO_ROOT;
         const std::filesystem::path fixturePath = repoRoot / "data/Subject140/140_orig.mgz";
         const std::filesystem::path outputDir = makeFreshDirectory("openhc_imaging_mri_fastsurfer_native_force_histogram_scaled_subject140_test");
 
@@ -890,26 +1103,26 @@ void test_subject140_already_conformed()
         const auto copyPath = outputDir / "copy_orig.mgz";
         const auto conformedPath = outputDir / "conformed_orig.mgz";
 
-        const auto inputImage = OpenHC::imaging::mri::fastsurfer::MghImage::load(fixturePath);
+        const auto inputImage = ohc::MghImage::load(fixturePath);
         require(!inputImage.rawData().empty(), "The fixture MGZ appears empty or unreadable: " + fixturePath.string());
         require(inputImage.isUint8(), "The Subject140 fixture must start as uint8 so the test can isolate histogram scaling from the existing resampling-only shortcut.");
 
         const std::vector<float> floatSourceData = inputImage.voxelDataAsFloat();
         auto floatHeader = inputImage.header();
-        floatHeader.type = static_cast<std::int32_t>(OpenHC::imaging::mri::fastsurfer::MghDataType::Float32);
-        const auto floatInputImage = OpenHC::imaging::mri::fastsurfer::MghImage::fromVoxelData(
+        floatHeader.type = static_cast<std::int32_t>(ohc::MghDataType::Float32);
+        const auto floatInputImage = ohc::MghImage::fromVoxelData(
             floatHeader,
             floatSourceData,
-            static_cast<std::int32_t>(OpenHC::imaging::mri::fastsurfer::MghDataType::Float32));
+            static_cast<std::int32_t>(ohc::MghDataType::Float32));
         floatInputImage.save(floatInputPath);
 
-        OpenHC::imaging::mri::fastsurfer::ConformStepRequest request;
+        ohc::ConformStepRequest request;
         request.inputPath = floatInputPath;
         request.copyOrigPath = copyPath;
         request.conformedPath = conformedPath;
         request.forceConform = true;
 
-        OpenHC::imaging::mri::fastsurfer::ConformStepService service;
+        ohc::ConformStepService service;
         const auto result = service.run(request);
 
         require(result.success,
@@ -920,8 +1133,8 @@ void test_subject140_already_conformed()
         require(std::filesystem::exists(conformedPath), "The forced histogram-scaling test did not write the conformed output.");
 
         const SourceOracle sourceOracle = buildSourceOracle(floatInputImage);
-        const auto copyImage = OpenHC::imaging::mri::fastsurfer::MghImage::load(copyPath);
-        const auto outputImage = OpenHC::imaging::mri::fastsurfer::MghImage::load(conformedPath);
+        const auto copyImage = ohc::MghImage::load(copyPath);
+        const auto outputImage = ohc::MghImage::load(conformedPath);
 
         assertCopyOrigMatches(copyImage, floatInputImage);
         verifyOutputCase(floatInputImage, sourceOracle, request, result, outputImage);
@@ -934,28 +1147,29 @@ void test_subject140_already_conformed()
             "Forced histogram scaling on the already standardized Subject140 fixture diverged from the shared scale policy.");
         require(outputImage.rawData() != inputImage.rawData(),
             "Forced histogram scaling should change the uint8 payload relative to the original already conformed fixture.");
-    }
+}
 
-    void test_colin27_mgz_cases()
-    {
-        const std::filesystem::path repoRoot = FASTSURFER_REPO_ROOT;
+// Verifies conform behavior on the Colin27 MGZ fixture for native and canonical orientations.
+void test_colin27_mgz_cases()
+{
+        const std::filesystem::path repoRoot = OPENHC_REPO_ROOT;
         const auto fixturePath = repoRoot /
                      "data/Colin27-1/Users/arno.klein/Data/Mindboggle101/subjects/Colin27-1/mri/orig/001.mgz";
         const auto outputDir = makeFreshDirectory("openhc_imaging_mri_fastsurfer_conform_step_colin27_test");
-        const auto expectedCopy = OpenHC::imaging::mri::fastsurfer::MghImage::load(fixturePath);
+        const auto expectedCopy = ohc::MghImage::load(fixturePath);
         require(!expectedCopy.rawData().empty(), "The Colin27-1 MGZ fixture appears empty or could not be loaded: " + fixturePath.string());
         require(expectedCopy.orientationCode().size() == 3 && expectedCopy.orientationCode().find('?') == std::string::npos,
             "The Colin27-1 orientation code could not be derived from the MGZ header: '" + expectedCopy.orientationCode() + "'.");
 
         const SourceOracle sourceOracle = buildSourceOracle(expectedCopy);
-        OpenHC::imaging::mri::fastsurfer::ConformStepService service;
+        ohc::ConformStepService service;
 
-        for (const OpenHC::imaging::mri::fastsurfer::OrientationMode orientation : {OpenHC::imaging::mri::fastsurfer::OrientationMode::Native, OpenHC::imaging::mri::fastsurfer::OrientationMode::Lia}) {
-        const auto caseDir = outputDir / OpenHC::imaging::mri::fastsurfer::to_string(orientation);
+        for (const ohc::OrientationMode orientation : {ohc::OrientationMode::Native, ohc::OrientationMode::Lia}) {
+        const auto caseDir = outputDir / ohc::to_string(orientation);
         const auto copyPath = caseDir / "copy_orig.mgz";
         const auto conformedPath = caseDir / "conformed_orig.mgz";
 
-        OpenHC::imaging::mri::fastsurfer::ConformStepRequest request;
+        ohc::ConformStepRequest request;
         request.inputPath = fixturePath;
         request.copyOrigPath = copyPath;
         request.conformedPath = conformedPath;
@@ -982,20 +1196,21 @@ void test_subject140_already_conformed()
         requireNear(result.inputMetadata.spacing[2], expectedCopy.header().spacing[2], test_constants::METADATA_SPACING_TOLERANCE,
                 "The conform step reported unexpected Z spacing for the Colin27-1 fixture.");
 
-        const auto copyImage = OpenHC::imaging::mri::fastsurfer::MghImage::load(copyPath);
-        const auto conformedImage = OpenHC::imaging::mri::fastsurfer::MghImage::load(conformedPath);
+        const auto copyImage = ohc::MghImage::load(copyPath);
+        const auto conformedImage = ohc::MghImage::load(conformedPath);
 
         assertCopyOrigMatches(copyImage, expectedCopy);
         verifyOutputCase(expectedCopy, sourceOracle, request, result, conformedImage);
         }
-    }
+}
 
+// Verifies conform behavior on the oblique NIfTI fixture for native and canonical orientations.
 void test_oblique_nifti_cases()
 {
-    const std::filesystem::path repoRoot = FASTSURFER_REPO_ROOT;
+    const std::filesystem::path repoRoot = OPENHC_REPO_ROOT;
     const auto fixturePath = repoRoot / "data/parrec_oblique/NIFTI/3D_T1W_trans_35_25_15_SENSE_26_1.nii";
     const auto outputDir = makeFreshDirectory("openhc_imaging_mri_fastsurfer_conform_step_nifti_test");
-    const auto expectedCopy = OpenHC::imaging::mri::fastsurfer::NiftiConverter::loadAsMgh(fixturePath);
+    const auto expectedCopy = ohc::NiftiConverter::loadAsMgh(fixturePath);
     require(!expectedCopy.rawData().empty(), "The NIfTI fixture appears empty or could not be loaded: " + fixturePath.string());
 
     require(expectedCopy.header().dimensions == std::array<int, 3> {320, 320, 180},
@@ -1010,14 +1225,14 @@ void test_oblique_nifti_cases()
                 "The direct NIfTI conversion produced unexpected Z spacing for the oblique fixture.");
 
     const SourceOracle sourceOracle = buildSourceOracle(expectedCopy);
-    OpenHC::imaging::mri::fastsurfer::ConformStepService service;
+    ohc::ConformStepService service;
 
-    for (const OpenHC::imaging::mri::fastsurfer::OrientationMode orientation : {OpenHC::imaging::mri::fastsurfer::OrientationMode::Native, OpenHC::imaging::mri::fastsurfer::OrientationMode::Lia}) {
-        const auto caseDir = outputDir / OpenHC::imaging::mri::fastsurfer::to_string(orientation);
+    for (const ohc::OrientationMode orientation : {ohc::OrientationMode::Native, ohc::OrientationMode::Lia}) {
+        const auto caseDir = outputDir / ohc::to_string(orientation);
         const auto copyPath = caseDir / "copy_orig.mgz";
         const auto conformedPath = caseDir / "conformed_orig.mgz";
 
-        OpenHC::imaging::mri::fastsurfer::ConformStepRequest request;
+        ohc::ConformStepRequest request;
         request.inputPath = fixturePath;
         request.copyOrigPath = copyPath;
         request.conformedPath = conformedPath;
@@ -1046,8 +1261,8 @@ void test_oblique_nifti_cases()
         requireNear(result.inputMetadata.spacing[2], 1.0F, test_constants::METADATA_SPACING_TOLERANCE,
                     "The conform step reported unexpected Z spacing for the NIfTI fixture.");
 
-        const auto copyImage = OpenHC::imaging::mri::fastsurfer::MghImage::load(copyPath);
-        const auto conformedImage = OpenHC::imaging::mri::fastsurfer::MghImage::load(conformedPath);
+        const auto copyImage = ohc::MghImage::load(copyPath);
+        const auto conformedImage = ohc::MghImage::load(conformedPath);
 
         assertCopyOrigMatches(copyImage, expectedCopy);
         if (result.alreadyConformed) {
@@ -1060,6 +1275,9 @@ void test_oblique_nifti_cases()
     }
 }
 
+// Dispatches one named merged conform test case.
+// Parameters:
+// - caseName: CLI token identifying the test case to run.
 void runNamedCase(const std::string &caseName)
 {
     if (caseName == "conformed") {
@@ -1092,6 +1310,11 @@ void runNamedCase(const std::string &caseName)
 
 } // namespace
 
+// Runs one or more conform-step test scenarios from the command line.
+// Parameters:
+// - argc: Argument count. Optional second argument selects one named case.
+// - argv: Argument vector containing the optional case selector.
+// Returns 0 on success and 1 on failure.
 int main(int argc, char **argv)
 {
     try {

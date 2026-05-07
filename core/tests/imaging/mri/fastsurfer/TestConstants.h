@@ -5,18 +5,26 @@ namespace test_constants {
 // Hard validation contract for _app/core tests.
 // Do not widen these thresholds without deliberate parity review.
 
+// Shared threshold for the 1 mm snapping behavior under test.
 inline constexpr float CONFORM_THRESHOLD_1MM = 0.95F;
+// Canonical target voxel size used by conform outputs.
 inline constexpr float UNIT_VOXEL_SIZE_MM = 1.0F;
 // Tolerance used when comparing computed target voxel sizes in unit tests.
 inline constexpr float CONFORM_POLICY_VOXEL_TOLERANCE = 1.0e-5F;
+// Shared decimal precision used by the conform rounding checks.
 inline constexpr float FLOAT_ROUNDING_SCALE = 10000.0F;
 inline constexpr double DOUBLE_ROUNDING_SCALE = 10000.0;
 
+// Tolerance for affine linear-term comparisons.
 inline constexpr double AFFINE_LINEAR_TOLERANCE = 1.0e-4;
+// Tolerance for affine translation comparisons in millimeters.
 inline constexpr double AFFINE_TRANSLATION_TOLERANCE_MM = 1.0e-4;
+// Tolerance for the affine homogeneous row checks.
 inline constexpr double HOMOGENEOUS_ROW_TOLERANCE = 1.0e-6;
 
+// Tolerance for metadata spacing values reported by the native API.
 inline constexpr float METADATA_SPACING_TOLERANCE = 1.0e-5F;
+// Tolerance for spacing comparisons against Python parity artifacts.
 inline constexpr float PARITY_SPACING_TOLERANCE = 1.0e-4F;
 
 inline constexpr double DIRECTION_MATRIX_TOLERANCE = 1.0e-5;

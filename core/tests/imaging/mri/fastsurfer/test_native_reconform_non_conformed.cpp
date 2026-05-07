@@ -12,8 +12,14 @@
 #include "imaging/mri/fastsurfer/step_conform.h"
 #include "imaging/mri/fastsurfer/mgh_image.h"
 
+namespace ohc = OpenHC::imaging::mri::fastsurfer;
+
 namespace {
 
+// Creates a clean output directory for the reconform regression fixture.
+// Parameters:
+// - name: Directory suffix used to isolate this test run.
+// Returns the recreated directory path.
 std::filesystem::path makeUniqueDirectory(const std::string &name)
 {
     const auto root = std::filesystem::temp_directory_path() / name;
@@ -24,16 +30,20 @@ std::filesystem::path makeUniqueDirectory(const std::string &name)
 
 // assertion helpers are provided by TestHelpers.h
 
-OpenHC::imaging::mri::fastsurfer::MghImage createSyntheticNonConformedInput(const std::filesystem::path &fixturePath)
+// Builds a deliberately non-conformed synthetic input from the Subject140 fixture.
+// Parameters:
+// - fixturePath: Source MGZ fixture used to seed voxel values.
+// Returns a cropped float image with non-conforming geometry.
+ohc::MghImage createSyntheticNonConformedInput(const std::filesystem::path &fixturePath)
 {
-    const auto sourceImage = OpenHC::imaging::mri::fastsurfer::MghImage::load(fixturePath);
+    const auto sourceImage = ohc::MghImage::load(fixturePath);
     const auto sourceData = sourceImage.voxelDataAsFloat();
     require(!sourceData.empty(), "The fixture MGZ appears empty or unreadable: " + fixturePath.string());
 
-    OpenHC::imaging::mri::fastsurfer::MghImage::Header header = sourceImage.header();
+    ohc::MghImage::Header header = sourceImage.header();
     header.dimensions = {64, 72, 80};
     header.frames = 1;
-    header.type = static_cast<std::int32_t>(OpenHC::imaging::mri::fastsurfer::MghDataType::Float32);
+    header.type = static_cast<std::int32_t>(ohc::MghDataType::Float32);
     header.spacing = {1.1F, 1.2F, 0.9F};
     header.directionCosines = {
         1.0F, 0.0F, 0.0F,
@@ -68,9 +78,13 @@ OpenHC::imaging::mri::fastsurfer::MghImage createSyntheticNonConformedInput(cons
         }
     }
 
-    return OpenHC::imaging::mri::fastsurfer::MghImage::fromVoxelData(header, cropped, header.type);
+    return ohc::MghImage::fromVoxelData(header, cropped, header.type);
 }
 
+// Returns true when all spacing components are within parity tolerance of target.
+// Parameters:
+// - spacing: Spacing triplet to validate.
+// - target: Expected isotropic spacing.
 bool allSpacingClose(const std::array<float, 3> &spacing, const float target)
 {
     return std::all_of(spacing.begin(), spacing.end(), [target](const float value) {
@@ -80,10 +94,12 @@ bool allSpacingClose(const std::array<float, 3> &spacing, const float target)
 
 } // namespace
 
+// Verifies reconforming behavior on a synthetic non-conformed MGZ input.
+// Returns 0 on success and 1 on failure.
 int main()
 {
     try {
-        const std::filesystem::path repoRoot = FASTSURFER_REPO_ROOT;
+        const std::filesystem::path repoRoot = OPENHC_REPO_ROOT;
         const std::filesystem::path fixturePath = repoRoot / "data/Subject140/140_orig.mgz";
         const std::filesystem::path outputDir = makeUniqueDirectory("openhc_imaging_mri_fastsurfer_native_reconform_test");
 
@@ -94,13 +110,15 @@ int main()
         const auto syntheticInput = createSyntheticNonConformedInput(fixturePath);
         syntheticInput.save(inputPath);
 
-        OpenHC::imaging::mri::fastsurfer::ConformStepRequest request;
+        ohc::ConformStepRequest request;
         request.inputPath = inputPath;
         request.copyOrigPath = copyPath;
         request.conformedPath = conformedPath;
         request.imageSizeMode = OpenHC::imaging::mri::fastsurfer::ImageSizeMode::Fov;
 
-        OpenHC::imaging::mri::fastsurfer::ConformStepService service;
+        request.imageSizeMode = ohc::ImageSizeMode::Fov;
+
+        ohc::ConformStepService service;
         const auto result = service.run(request);
 
         require(result.success, "The native reconform step did not succeed for the synthetic MGZ input.");
@@ -108,11 +126,11 @@ int main()
         require(std::filesystem::exists(copyPath), "The native reconform step did not write the original copy output.");
         require(std::filesystem::exists(conformedPath), "The native reconform step did not write the conformed MGZ output.");
 
-        const auto copiedImage = OpenHC::imaging::mri::fastsurfer::MghImage::load(copyPath);
-        const auto outputImage = OpenHC::imaging::mri::fastsurfer::MghImage::load(conformedPath);
+        const auto copiedImage = ohc::MghImage::load(copyPath);
+        const auto outputImage = ohc::MghImage::load(conformedPath);
 
         require(copiedImage.rawData() == syntheticInput.rawData(), "The original-copy output does not match the synthetic input payload.");
-        require(outputImage.header().type == static_cast<std::int32_t>(OpenHC::imaging::mri::fastsurfer::MghDataType::UChar),
+        require(outputImage.header().type == static_cast<std::int32_t>(ohc::MghDataType::UChar),
                 "The reconformed output is not stored as uint8.");
         require(outputImage.orientationCode() == "LIA", "The reconformed output is not in LIA orientation.");
         require(allSpacingClose(outputImage.header().spacing, 0.9F), "The reconformed output spacing is not isotropic 0.9 mm.");

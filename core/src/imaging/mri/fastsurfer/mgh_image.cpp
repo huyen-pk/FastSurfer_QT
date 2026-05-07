@@ -19,6 +19,7 @@ using Matrix3 = std::array<std::array<double, 3>, 3>;
 using Vector3 = std::array<double, 3>;
 using Vector4 = std::array<double, 4>;
 
+// MGH headers are serialized in big-endian order regardless of host platform.
 std::int16_t readInt16BigEndian(const std::uint8_t *data)
 {
     return static_cast<std::int16_t>((static_cast<std::uint16_t>(data[0]) << 8U) |
@@ -69,6 +70,7 @@ void writeFloatBigEndian(std::uint8_t *data, float value)
     data[3] = static_cast<std::uint8_t>(bits & 0xFFU);
 }
 
+// Reads one voxel as an integer-like value according to the declared MGH type.
 std::int32_t readInt32Value(const std::uint8_t *data, const std::int32_t typeCode)
 {
     switch (static_cast<MghDataType>(typeCode)) {
@@ -85,6 +87,7 @@ std::int32_t readInt32Value(const std::uint8_t *data, const std::int32_t typeCod
     throw std::runtime_error("Unsupported MGH data type code: " + std::to_string(typeCode));
 }
 
+// Reads one voxel as float regardless of its serialized MGH storage type.
 float readVoxelAsFloat(const std::uint8_t *data, const std::int32_t typeCode)
 {
     switch (static_cast<MghDataType>(typeCode)) {
@@ -101,6 +104,7 @@ float readVoxelAsFloat(const std::uint8_t *data, const std::int32_t typeCode)
     throw std::runtime_error("Unsupported MGH data type code: " + std::to_string(typeCode));
 }
 
+// Encodes one float sample into the target MGH storage representation.
 void writeVoxelFromFloat(std::uint8_t *data, const float value, const std::int32_t typeCode)
 {
     switch (static_cast<MghDataType>(typeCode)) {
@@ -127,6 +131,7 @@ void writeVoxelFromFloat(std::uint8_t *data, const float value, const std::int32
     throw std::runtime_error("Unsupported MGH data type code: " + std::to_string(typeCode));
 }
 
+// Derives one orientation letter from the dominant direction of an affine axis.
 std::string axisCodeForVector(const Vector3 &vector)
 {
     constexpr std::array<char, 3> positive {'R', 'A', 'S'};
@@ -146,9 +151,12 @@ std::string axisCodeForVector(const Vector3 &vector)
         return "?";
     }
 
+    // Mirror nibabel-style orientation decoding by selecting the dominant axis
+    // direction for each affine column.
     return std::string(1, vector[dominantAxis] >= 0.0F ? positive[dominantAxis] : negative[dominantAxis]);
 }
 
+// Builds the three-letter orientation code from the affine's spatial columns.
 std::string orientationFromAffine(const Matrix4 &affine)
 {
     std::string result;
@@ -163,6 +171,7 @@ std::string orientationFromAffine(const Matrix4 &affine)
     return result;
 }
 
+// Inverts a 3x3 matrix for affine and orientation calculations.
 Matrix3 inverse3x3(const Matrix3 &matrix)
 {
     const double determinant =
@@ -188,12 +197,15 @@ Matrix3 inverse3x3(const Matrix3 &matrix)
     }};
 }
 
+// Validates header dimensions and returns the implied voxel count.
 std::size_t checkedVoxelCount(const MghImage::Header &header)
 {
     if (header.dimensions[0] < 0 || header.dimensions[1] < 0 || header.dimensions[2] < 0 || header.frames < 0) {
         throw std::runtime_error("MGH header contains negative dimensions.");
     }
 
+    // The native core currently accepts the header product directly once the
+    // sign check has ruled out obviously invalid geometry.
     const auto width = static_cast<std::size_t>(header.dimensions[0]);
     const auto height = static_cast<std::size_t>(header.dimensions[1]);
     const auto depth = static_cast<std::size_t>(header.dimensions[2]);
@@ -201,6 +213,7 @@ std::size_t checkedVoxelCount(const MghImage::Header &header)
     return width * height * depth * frames;
 }
 
+// Applies a homogeneous 4x4 transform to a 4D vector.
 Vector4 multiply(const Matrix4 &matrix, const Vector4 &vector)
 {
     Vector4 result {};
@@ -288,6 +301,8 @@ MghImage MghImage::load(const std::filesystem::path &path)
     }
 
     MghImage image;
+    // The fixed-size MGH header stores geometry first, followed by the raw
+    // voxel payload encoded using the declared storage type.
     image.m_header.version = readInt32BigEndian(&headerBytes[0]);
     image.m_header.dimensions = {
         readInt32BigEndian(&headerBytes[4]),
@@ -332,6 +347,8 @@ void MghImage::save(const std::filesystem::path &path) const
     std::filesystem::create_directories(path.parent_path());
 
     std::array<std::uint8_t, constants::mgh::HEADER_SIZE> headerBytes {};
+    // Preserve the same serialized layout that load() expects so round-trips do
+    // not depend on host endianness or struct packing.
     writeInt32BigEndian(&headerBytes[0], m_header.version);
     writeInt32BigEndian(&headerBytes[4], m_header.dimensions[0]);
     writeInt32BigEndian(&headerBytes[8], m_header.dimensions[1]);
@@ -447,6 +464,8 @@ Matrix4 MghImage::affine() const
     };
 
     for (int row = 0; row < 3; ++row) {
+        // FreeSurfer stores the volume center instead of a direct translation,
+        // so convert that center back into the affine origin here.
         double offset = static_cast<double>(m_header.center[row]);
         for (int column = 0; column < 3; ++column) {
             offset -= affine[row][column] * halfDimensions[column];

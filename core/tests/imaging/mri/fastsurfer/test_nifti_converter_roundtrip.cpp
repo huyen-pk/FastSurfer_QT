@@ -9,8 +9,14 @@
 #include "TestHelpers.h"
 #include "imaging/mri/fastsurfer/nifti_converter.h"
 
+namespace ohc = OpenHC::imaging::mri::fastsurfer;
+
 namespace {
 
+// Creates a clean temporary directory for one test program invocation.
+// Parameters:
+// - name: Directory suffix used to isolate this test run.
+// Returns the recreated directory path.
 std::filesystem::path makeFreshDirectory(const std::string &name)
 {
     if (const char *envTmp = std::getenv("FASTSURFER_TEST_TMPDIR"); envTmp != nullptr && envTmp[0] != '\0') {
@@ -28,6 +34,10 @@ std::filesystem::path makeFreshDirectory(const std::string &name)
 
 // assertion helpers are provided by TestHelpers.h
 
+// Escapes a filesystem path for safe single-quoted shell invocation.
+// Parameters:
+// - path: Filesystem path to escape.
+// Returns a shell-safe quoted string.
 std::string shellEscape(const std::filesystem::path &path)
 {
     std::string value = path.string();
@@ -45,6 +55,10 @@ std::string shellEscape(const std::filesystem::path &path)
     return escaped;
 }
 
+// Resolves the Python interpreter used for the nibabel-based round-trip check.
+// Parameters:
+// - repoRoot: Workspace root used to probe local virtual environments.
+// Returns the chosen Python executable path or command.
 std::filesystem::path resolvePythonExecutable(const std::filesystem::path &repoRoot)
 {
     if (const char *configured = std::getenv("FASTSURFER_PYTHON_EXECUTABLE"); configured != nullptr && configured[0] != '\0') {
@@ -66,10 +80,12 @@ std::filesystem::path resolvePythonExecutable(const std::filesystem::path &repoR
 
 } // namespace
 
+// Converts one NIfTI fixture to MGZ and verifies the round-trip back to NIfTI.
+// Returns 0 on success and 1 on failure.
 int main()
 {
     try {
-        const std::filesystem::path repoRoot = FASTSURFER_REPO_ROOT;
+        const std::filesystem::path repoRoot = OPENHC_REPO_ROOT;
         const auto pythonExecutable = resolvePythonExecutable(repoRoot);
         const auto outputDir = makeFreshDirectory("openhc_imaging_mri_fastsurfer_nifti_roundtrip_test");
 
@@ -78,7 +94,7 @@ int main()
         const auto roundtripNiftiPath = outputDir / "roundtrip_output.nii.gz";
         const auto pythonScript = outputDir / "verify_roundtrip.py";
 
-        OpenHC::imaging::mri::fastsurfer::NiftiConverter::convertToMgh(inputPath, mgzPath);
+        ohc::NiftiConverter::convertToMgh(inputPath, mgzPath);
         require(std::filesystem::exists(mgzPath), "The native NIfTI converter did not write the MGZ intermediate file.");
 
         {

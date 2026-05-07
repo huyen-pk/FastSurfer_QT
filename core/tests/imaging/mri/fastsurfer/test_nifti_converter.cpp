@@ -12,22 +12,30 @@
 #include "imaging/mri/fastsurfer/mgh_image.h"
 #include "imaging/mri/fastsurfer/nifti_converter.h"
 
+namespace ohc = OpenHC::imaging::mri::fastsurfer;
+
 namespace {
 
+// Expected voxel sample taken from a converted fixture.
 struct VoxelExpectation {
     std::array<int, 3> index;
     float value;
 };
 
+// Expected geometry and sample values for one NIfTI conversion fixture.
 struct FixtureExpectation {
     std::string relativePath;
     std::array<int, 3> dimensions;
     std::array<float, 3> spacing;
     std::string orientation;
-    OpenHC::imaging::mri::fastsurfer::Matrix4 affine;
+    ohc::Matrix4 affine;
     std::vector<VoxelExpectation> voxels;
 };
 
+// Creates a clean temporary directory for one test program invocation.
+// Parameters:
+// - name: Directory suffix used to isolate this test run.
+// Returns the recreated directory path.
 std::filesystem::path makeFreshDirectory(const std::string &name)
 {
     if (const char *envTmp = std::getenv("FASTSURFER_TEST_TMPDIR"); envTmp != nullptr && envTmp[0] != '\0') {
@@ -45,7 +53,11 @@ std::filesystem::path makeFreshDirectory(const std::string &name)
 
 // assertion helpers are provided by TestHelpers.h
 
-void assertAffineClose(const OpenHC::imaging::mri::fastsurfer::Matrix4 &actual, const OpenHC::imaging::mri::fastsurfer::Matrix4 &expected)
+// Verifies that two affines agree within the shared linear tolerance.
+// Parameters:
+// - actual: Observed affine from the converted output.
+// - expected: Fixture affine expected for the converted output.
+void assertAffineClose(const ohc::Matrix4 &actual, const ohc::Matrix4 &expected)
 {
     for (int row = 0; row < 4; ++row) {
         for (int column = 0; column < 4; ++column) {
@@ -55,7 +67,12 @@ void assertAffineClose(const OpenHC::imaging::mri::fastsurfer::Matrix4 &actual, 
     }
 }
 
-float voxelAt(const OpenHC::imaging::mri::fastsurfer::MghImage &image, const std::array<int, 3> &index)
+// Reads one voxel sample from an MGH image using x, y, z coordinates.
+// Parameters:
+// - image: Image to sample.
+// - index: Voxel coordinates in storage order.
+// Returns the voxel value as float.
+float voxelAt(const ohc::MghImage &image, const std::array<int, 3> &index)
 {
     const auto dims = image.header().dimensions;
     const std::size_t flatIndex =
@@ -65,6 +82,7 @@ float voxelAt(const OpenHC::imaging::mri::fastsurfer::MghImage &image, const std
     return image.voxelDataAsFloat().at(flatIndex);
 }
 
+// Returns the curated conversion fixtures and their expected outputs.
 std::vector<FixtureExpectation> fixtureExpectations()
 {
     return {
@@ -73,7 +91,7 @@ std::vector<FixtureExpectation> fixtureExpectations()
             {560, 560, 1},
             {0.42857143F, 0.42857143F, 5.0F},
             "LPS",
-            OpenHC::imaging::mri::fastsurfer::Matrix4 {{
+            ohc::Matrix4 {{
                 {{-0.428571433, 0.0, 0.0, 122.404823303}},
                 {{0.0, -0.428571433, 0.0, 130.220428467}},
                 {{0.0, 0.0, 5.0, 0.0}},
@@ -90,7 +108,7 @@ std::vector<FixtureExpectation> fixtureExpectations()
             {320, 320, 180},
             {0.8F, 0.8F, 1.0F},
             "LPS",
-            OpenHC::imaging::mri::fastsurfer::Matrix4 {{
+            ohc::Matrix4 {{
                 {{-0.632992056, 0.169609815, -0.573576472, 126.919281006}},
                 {{-0.374971205, -0.650149859, 0.346188561, 133.138259888}},
                 {{-0.314193685, 0.434209270, 0.742403873, -74.587806702}},
@@ -107,10 +125,12 @@ std::vector<FixtureExpectation> fixtureExpectations()
 
 } // namespace
 
+// Verifies the native NIfTI-to-MGZ conversion fixtures.
+// Returns 0 on success and 1 on failure.
 int main()
 {
     try {
-        const std::filesystem::path repoRoot = FASTSURFER_REPO_ROOT;
+        const std::filesystem::path repoRoot = OPENHC_REPO_ROOT;
         const std::filesystem::path outputDir = makeFreshDirectory("openhc_imaging_mri_fastsurfer_nifti_converter_test");
 
         for (const FixtureExpectation &fixture : fixtureExpectations()) {

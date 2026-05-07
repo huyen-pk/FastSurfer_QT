@@ -26,11 +26,15 @@ using Vector3 = std::array<double, 3>;
 using Vector4 = std::array<double, 4>;
 using FloatImage3D = itk::Image<float, 3>;
 
+// Encodes how a source orientation maps onto a requested target orientation.
 struct OrientationTransform {
+    // Source axis used for each target axis.
     std::array<int, 3> axes {0, 1, 2};
+    // Sign flip applied after axis selection.
     std::array<int, 3> flips {1, 1, 1};
 };
 
+// Uppercases orientation strings for case-insensitive comparisons.
 std::string normalizeUpper(std::string value)
 {
     std::transform(value.begin(), value.end(), value.begin(), [](unsigned char character) {
@@ -39,6 +43,7 @@ std::string normalizeUpper(std::string value)
     return value;
 }
 
+// Resolves the effective output orientation code requested by the caller.
 std::string resolveOrientationCode(const OrientationMode requestedOrientation, const std::string &sourceOrientation)
 {
     if (requestedOrientation == OrientationMode::Native) {
@@ -48,6 +53,7 @@ std::string resolveOrientationCode(const OrientationMode requestedOrientation, c
     return normalizeUpper(to_string(requestedOrientation));
 }
 
+// Groups orientation letters by anatomical axis family.
 int axisGroup(const char axisCode)
 {
     switch (static_cast<char>(std::toupper(static_cast<unsigned char>(axisCode)))) {
@@ -65,6 +71,7 @@ int axisGroup(const char axisCode)
     }
 }
 
+// Converts one orientation letter into its unit direction vector.
 Vector3 axisVector(const char axisCode)
 {
     switch (static_cast<char>(std::toupper(static_cast<unsigned char>(axisCode)))) {
@@ -85,9 +92,12 @@ Vector3 axisVector(const char axisCode)
     }
 }
 
+// Computes axis remapping information between source and target orientation codes.
 OrientationTransform computeOrientationTransform(const std::string &sourceOrientation, const std::string &targetOrientation)
 {
     OrientationTransform transform;
+    // Match axes by anatomical group first, then record whether the target axis
+    // requires a sign flip relative to the source orientation.
     for (int targetAxis = 0; targetAxis < 3; ++targetAxis) {
         const int targetGroup = axisGroup(targetOrientation[targetAxis]);
         bool found = false;
@@ -115,6 +125,7 @@ OrientationTransform computeOrientationTransform(const std::string &sourceOrient
     return transform;
 }
 
+// Inverts a 3x3 matrix used by the affine decomposition helpers below.
 Matrix3 inverse3x3(const Matrix3 &matrix)
 {
     const double determinant =
@@ -140,6 +151,7 @@ Matrix3 inverse3x3(const Matrix3 &matrix)
     }};
 }
 
+// Multiplies two 3x3 matrices.
 Matrix3 multiply3x3(const Matrix3 &left, const Matrix3 &right)
 {
     Matrix3 result {{
@@ -159,6 +171,7 @@ Matrix3 multiply3x3(const Matrix3 &left, const Matrix3 &right)
     return result;
 }
 
+// Multiplies two homogeneous 4x4 transforms.
 Matrix4 multiply(const Matrix4 &left, const Matrix4 &right)
 {
     Matrix4 result {{
@@ -178,6 +191,7 @@ Matrix4 multiply(const Matrix4 &left, const Matrix4 &right)
     return result;
 }
 
+// Applies a homogeneous 4x4 transform to one 4D vector.
 Vector4 multiply(const Matrix4 &matrix, const Vector4 &vector)
 {
     Vector4 result {};
@@ -190,6 +204,7 @@ Vector4 multiply(const Matrix4 &matrix, const Vector4 &vector)
     return result;
 }
 
+// Inverts an affine transform that consists of a 3x3 linear part plus translation.
 Matrix4 inverseAffine(const Matrix4 &matrix)
 {
     const Matrix3 linear {{
@@ -214,11 +229,13 @@ Matrix4 inverseAffine(const Matrix4 &matrix)
     return inverse;
 }
 
+// Returns true when two floating-point values are within epsilon.
 bool isClose(const double left, const double right, const double epsilon)
 {
     return std::fabs(left - right) <= epsilon;
 }
 
+// Returns true when the affine translation component is effectively integer-valued.
 bool hasIntegerTranslation(const Matrix4 &vox2vox, const double epsilon)
 {
     return isClose(vox2vox[0][3], std::round(vox2vox[0][3]), epsilon) &&
@@ -226,6 +243,7 @@ bool hasIntegerTranslation(const Matrix4 &vox2vox, const double epsilon)
            isClose(vox2vox[2][3], std::round(vox2vox[2][3]), epsilon);
 }
 
+// Returns true when the full 4x4 transform is numerically close to identity.
 bool allCloseIdentity(const Matrix4 &matrix, const double epsilon)
 {
     for (int row = 0; row < 4; ++row) {
@@ -239,8 +257,11 @@ bool allCloseIdentity(const Matrix4 &matrix, const double epsilon)
     return true;
 }
 
+// Returns true when the affine includes a non-axis-aligned rotation or scaling component.
 bool rotationRequiresInterpolation(const Matrix4 &vox2vox)
 {
+    // Pure axis permutations and sign flips can be handled with nearest-index
+    // remapping. Any other linear component requires interpolation.
     for (int row = 0; row < 3; ++row) {
         for (int column = 0; column < 3; ++column) {
             const double absoluteValue = std::fabs(vox2vox[row][column]);
@@ -253,6 +274,7 @@ bool rotationRequiresInterpolation(const Matrix4 &vox2vox)
     return false;
 }
 
+// Reconstructs the vox2ras affine represented by an MGH header.
 Matrix4 affineFromHeader(const MghImage::Header &header)
 {
     Matrix4 affine {{
@@ -270,6 +292,8 @@ Matrix4 affineFromHeader(const MghImage::Header &header)
     }
 
     for (int row = 0; row < 3; ++row) {
+        // MGH stores the center of the output lattice, so recover the affine
+        // origin by subtracting half the image extent along each axis.
         affine[row][3] = static_cast<double>(header.center[row]);
         for (int column = 0; column < 3; ++column) {
             affine[row][3] -= affine[row][column] * (static_cast<double>(header.dimensions[column]) / 2.0);
@@ -279,6 +303,7 @@ Matrix4 affineFromHeader(const MghImage::Header &header)
     return affine;
 }
 
+// Builds canonical direction cosines for a three-letter orientation code.
 std::array<float, 9> directionCosinesForOrientation(const std::string &orientation)
 {
     std::array<float, 9> directionCosines {};
@@ -291,6 +316,7 @@ std::array<float, 9> directionCosinesForOrientation(const std::string &orientati
     return directionCosines;
 }
 
+// Reorders native target dimensions to match the requested output orientation.
 std::array<int, 3> targetDimensionsForOrientation(
     const std::array<int, 3> &nativeTargetDimensions,
     const std::string &sourceOrientation,
@@ -317,6 +343,7 @@ std::array<int, 3> targetDimensionsForOrientation(
     return targetDimensions;
 }
 
+// Extracts the linear 3x3 component from a homogeneous affine transform.
 Matrix3 linearPart(const Matrix4 &affine)
 {
     Matrix3 linear {{
@@ -334,6 +361,7 @@ Matrix3 linearPart(const Matrix4 &affine)
     return linear;
 }
 
+// Combines direction cosines and spacing into the affine's linear component.
 Matrix3 scaledDirectionMatrix(const std::array<float, 9> &directionCosines, const std::array<float, 3> &spacing)
 {
     Matrix3 linear {{
@@ -352,11 +380,14 @@ Matrix3 scaledDirectionMatrix(const std::array<float, 9> &directionCosines, cons
     return linear;
 }
 
+// Computes the translation needed to align source and target lattice centers.
 Vector3 translationToFixCenter(
     const Matrix3 &vox2voxLinear,
     const std::array<int, 3> &sourceDimensions,
     const std::array<int, 3> &targetDimensions)
 {
+    // Compute the translation that makes the transformed target lattice center
+    // land on the source lattice center in voxel coordinates.
     const Vector3 sourceCenter {
         (static_cast<double>(sourceDimensions[0]) - 1.0) / 2.0,
         (static_cast<double>(sourceDimensions[1]) - 1.0) / 2.0,
@@ -379,6 +410,7 @@ Vector3 translationToFixCenter(
     return translation;
 }
 
+// Converts an affine back into the MGH header's stored center representation.
 std::array<float, 3> headerCenterFromAffine(const Matrix4 &affine, const std::array<int, 3> &dimensions)
 {
     std::array<float, 3> center {};
@@ -393,6 +425,7 @@ std::array<float, 3> headerCenterFromAffine(const Matrix4 &affine, const std::ar
     return center;
 }
 
+// Builds the output header implied by the requested conform policy.
 MghImage::Header buildTargetHeader(
     const MghImage &image,
     const float targetVoxelSize,
@@ -415,6 +448,8 @@ MghImage::Header buildTargetHeader(
         ? image.header().directionCosines
         : directionCosinesForOrientation(orientation);
 
+    // Build a target vox2vox transform that preserves world-space geometry as
+    // closely as the chosen target spacing, dimensions, and orientation allow.
     const Matrix4 sourceAffine = image.affine();
     const Matrix3 sourceLinear = linearPart(sourceAffine);
     const Matrix3 targetLinear = scaledDirectionMatrix(header.directionCosines, header.spacing);
@@ -435,6 +470,7 @@ MghImage::Header buildTargetHeader(
     return header;
 }
 
+// Flattens 3D voxel coordinates into a row-major linear index.
 std::size_t flattenIndex(const std::array<int, 3> &dimensions, const int x, const int y, const int z)
 {
     return (static_cast<std::size_t>(z) * static_cast<std::size_t>(dimensions[1]) + static_cast<std::size_t>(y)) *
@@ -442,6 +478,7 @@ std::size_t flattenIndex(const std::array<int, 3> &dimensions, const int x, cons
            static_cast<std::size_t>(x);
 }
 
+// Converts MGH header direction cosines into an ITK direction matrix.
 FloatImage3D::DirectionType itkDirectionFromHeader(const MghImage::Header &header)
 {
     FloatImage3D::DirectionType direction;
@@ -454,6 +491,7 @@ FloatImage3D::DirectionType itkDirectionFromHeader(const MghImage::Header &heade
     return direction;
 }
 
+// Extracts the physical origin used by ITK from a vox2ras affine.
 FloatImage3D::PointType itkOriginFromAffine(const Matrix4 &affine)
 {
     FloatImage3D::PointType origin;
@@ -463,6 +501,7 @@ FloatImage3D::PointType itkOriginFromAffine(const Matrix4 &affine)
     return origin;
 }
 
+// Converts header spacing into ITK's spacing type.
 FloatImage3D::SpacingType itkSpacingFromHeader(const MghImage::Header &header)
 {
     FloatImage3D::SpacingType spacing;
@@ -472,6 +511,7 @@ FloatImage3D::SpacingType itkSpacingFromHeader(const MghImage::Header &header)
     return spacing;
 }
 
+// Builds an ITK region from native integer dimensions.
 FloatImage3D::RegionType itkRegionFromDimensions(const std::array<int, 3> &dimensions)
 {
     FloatImage3D::RegionType region;
@@ -486,6 +526,7 @@ FloatImage3D::RegionType itkRegionFromDimensions(const std::array<int, 3> &dimen
     return region;
 }
 
+// Exposes MGH voxel data as an ITK image while reusing the existing float buffer.
 FloatImage3D::Pointer importAsItkImage(const MghImage &image, std::vector<float> &sourceData)
 {
     using ImportFilter = itk::ImportImageFilter<float, 3>;
@@ -499,6 +540,7 @@ FloatImage3D::Pointer importAsItkImage(const MghImage &image, std::vector<float>
     return importFilter->GetOutput();
 }
 
+// Creates an empty ITK image carrying only the requested target geometry.
 FloatImage3D::Pointer createGeometryImage(const MghImage::Header &header)
 {
     auto geometryImage = FloatImage3D::New();
@@ -509,6 +551,7 @@ FloatImage3D::Pointer createGeometryImage(const MghImage::Header &header)
     return geometryImage;
 }
 
+// Samples one source point using scipy-compatible trilinear interpolation.
 float sampleLinearLikeScipy(
     const std::vector<float> &sourceData,
     const std::array<int, 3> &dimensions,
@@ -540,6 +583,8 @@ float sampleLinearLikeScipy(
         }
     }
 
+    // Reproduce scipy.ndimage-style trilinear interpolation over the eight
+    // neighboring samples after clamping numerically close boundary points.
     double value = 0.0;
     for (int corner = 0; corner < 8; ++corner) {
         const int x = (corner & 1) == 0 ? lower[0] : upper[0];
@@ -556,6 +601,7 @@ float sampleLinearLikeScipy(
     return static_cast<float>(value);
 }
 
+// Resamples the source image in physical space using ITK geometry transforms.
 std::vector<float> mapImageWithItk(
     const MghImage &image,
     std::vector<float> &sourceData,
@@ -568,6 +614,8 @@ std::vector<float> mapImageWithItk(
                                    static_cast<std::size_t>(targetHeader.dimensions[2]);
     std::vector<float> mappedData(voxelCount, 0.0F);
 
+    // Ask ITK for the physical point of each target voxel, then evaluate the
+    // source image at that point using the scipy-compatible sampler above.
     for (int z = 0; z < targetHeader.dimensions[2]; ++z) {
         for (int y = 0; y < targetHeader.dimensions[1]; ++y) {
             for (int x = 0; x < targetHeader.dimensions[0]; ++x) {
@@ -591,6 +639,7 @@ std::vector<float> mapImageWithItk(
     return mappedData;
 }
 
+// Remaps voxels directly when the transform is only axis reindexing plus translation.
 std::vector<float> mapImageWithoutInterpolation(
     const std::vector<float> &sourceData,
     const std::array<int, 3> &sourceDimensions,
@@ -602,6 +651,8 @@ std::vector<float> mapImageWithoutInterpolation(
                                    static_cast<std::size_t>(targetDimensions[2]);
     std::vector<float> mappedData(voxelCount, 0.0F);
 
+    // Fast path for pure axis-aligned transforms: each target voxel maps to one
+    // rounded source index with no interpolation error.
     for (int z = 0; z < targetDimensions[2]; ++z) {
         for (int y = 0; y < targetDimensions[1]; ++y) {
             for (int x = 0; x < targetDimensions[0]; ++x) {
@@ -693,6 +744,8 @@ ConformStepResult ConformStepService::run(const ConformStepRequest &request) con
     const Matrix4 targetAffine = affineFromHeader(targetHeader);
     const Matrix4 targetToSource = multiply(inverseAffine(image.affine()), targetAffine);
     std::vector<float> sourceData = image.voxelDataAsFloat();
+    // Skip interpolation when the target grid differs only by axis-aligned
+    // reindexing plus integer translation. Otherwise resample in world space.
     std::vector<float> mappedData =
         !rotationRequiresInterpolation(targetToSource) && hasIntegerTranslation(targetToSource, 1.0e-4)
             ? mapImageWithoutInterpolation(sourceData, image.header().dimensions, targetHeader.dimensions, targetToSource)

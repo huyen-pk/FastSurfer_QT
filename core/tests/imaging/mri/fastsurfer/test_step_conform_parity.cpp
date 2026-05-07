@@ -17,6 +17,10 @@
 
 namespace {
 
+// Creates a clean temporary directory for one parity-test invocation.
+// Parameters:
+// - name: Directory suffix used to isolate this test run.
+// Returns the recreated directory path.
 std::filesystem::path makeFreshDirectory(const std::string &name)
 {
     const auto root = [&]() {
@@ -24,7 +28,7 @@ std::filesystem::path makeFreshDirectory(const std::string &name)
             return std::filesystem::path(envTmp) / name;
         }
 
-        const std::filesystem::path repoRoot = FASTSURFER_REPO_ROOT;
+        const std::filesystem::path repoRoot = OPENHC_REPO_ROOT;
         return repoRoot / ".tmp" / name;
     }();
 
@@ -41,6 +45,10 @@ std::filesystem::path makeFreshDirectory(const std::string &name)
 
 // use shared TestHelpers.h for assertion helpers
 
+// Escapes a filesystem path for safe single-quoted shell invocation.
+// Parameters:
+// - path: Filesystem path to escape.
+// Returns a shell-safe quoted string.
 std::string shellEscape(const std::filesystem::path &path)
 {
     std::string value = path.string();
@@ -58,6 +66,10 @@ std::string shellEscape(const std::filesystem::path &path)
     return escaped;
 }
 
+// Resolves the Python interpreter used for the parity reference script.
+// Parameters:
+// - repoRoot: Workspace root used to probe local virtual environments.
+// Returns the chosen Python executable path or command.
 std::filesystem::path resolvePythonExecutable(const std::filesystem::path &repoRoot)
 {
     if (const char *configured = std::getenv("FASTSURFER_PYTHON_EXECUTABLE"); configured != nullptr && configured[0] != '\0') {
@@ -77,7 +89,14 @@ std::filesystem::path resolvePythonExecutable(const std::filesystem::path &repoR
     return "python3";
 }
 
-OpenHC::imaging::mri::fastsurfer::MghImage createSyntheticNonConformedInput(const std::filesystem::path &fixturePath)
+namespace ohc = OpenHC::imaging::mri::fastsurfer;
+
+
+// Builds a deliberately non-conformed synthetic input from the Subject140 fixture.
+// Parameters:
+// - fixturePath: Source MGZ fixture used to seed voxel values.
+// Returns a cropped float image with non-conforming geometry.
+ohc::MghImage createSyntheticNonConformedInput(const std::filesystem::path &fixturePath)
 {
     const auto sourceImage = OpenHC::imaging::mri::fastsurfer::MghImage::load(fixturePath);
     const auto sourceData = sourceImage.voxelDataAsFloat();
@@ -124,6 +143,11 @@ OpenHC::imaging::mri::fastsurfer::MghImage createSyntheticNonConformedInput(cons
     return OpenHC::imaging::mri::fastsurfer::MghImage::fromVoxelData(header, cropped, header.type);
 }
 
+// Verifies that two affines agree within the configured tolerances.
+// Parameters:
+// - left: Affine produced by the native path.
+// - right: Affine produced by the Python reference.
+// - translationToleranceMm: Maximum allowed translation error in millimeters.
 void assertAffineClose(
     const OpenHC::imaging::mri::fastsurfer::Matrix4 &left,
     const OpenHC::imaging::mri::fastsurfer::Matrix4 &right,
@@ -146,6 +170,10 @@ void assertAffineClose(
             "Affine homogeneous row differs between native and Python outputs.");
 }
 
+// Verifies exact image equality between two MGZ outputs.
+// Parameters:
+// - leftPath: Path to the first output image.
+// - rightPath: Path to the second output image.
 void assertExactImageMatch(const std::filesystem::path &leftPath, const std::filesystem::path &rightPath)
 {
     const auto leftImage = OpenHC::imaging::mri::fastsurfer::MghImage::load(leftPath);
@@ -170,6 +198,11 @@ void assertExactImageMatch(const std::filesystem::path &leftPath, const std::fil
     require(leftData == rightData, "Voxel payload differs between native and Python outputs.");
 }
 
+// Verifies parity under the relaxed tolerances used for reconformed outputs.
+// Parameters:
+// - leftPath: Path to the native output image.
+// - rightPath: Path to the Python reference image.
+// - translationToleranceMm: Maximum allowed affine-translation error in millimeters.
 void assertComparableConformedImages(
     const std::filesystem::path &leftPath,
     const std::filesystem::path &rightPath,
@@ -218,8 +251,12 @@ void assertComparableConformedImages(
 
     }
 
-    std::string shellEscapeString(const std::string &value)
-    {
+// Escapes a raw string for safe single-quoted shell invocation.
+// Parameters:
+// - value: Raw command-line token to escape.
+// Returns a shell-safe quoted string.
+std::string shellEscapeString(const std::string &value)
+{
         std::string escaped;
         escaped.reserve(value.size() + 2);
         escaped.push_back('\'');
@@ -232,16 +269,21 @@ void assertComparableConformedImages(
         }
         escaped.push_back('\'');
         return escaped;
-    }
+}
 
-    int runCommand(const std::string &command)
-    {
+// Executes a shell command and returns the exit code.
+// Parameters:
+// - command: Full shell command to execute.
+// Returns the process exit code reported by std::system.
+int runCommand(const std::string &command)
+{
         return std::system(command.c_str());
-    }
+}
 
-    void test_step_conform_standardized_image_parity()
-    {
-        const std::filesystem::path repoRoot = FASTSURFER_REPO_ROOT;
+// Verifies native parity against the Python reference on a synthetic non-conformed MGZ input.
+void test_step_conform_standardized_image_parity()
+{
+        const std::filesystem::path repoRoot = OPENHC_REPO_ROOT;
         const std::filesystem::path fixturePath = repoRoot / "data/Subject140/140_orig.mgz";
         const auto pythonExecutable = resolvePythonExecutable(repoRoot);
 
@@ -315,11 +357,12 @@ void assertComparableConformedImages(
 
         assertExactImageMatch(nativeCopy, pythonCopy);
         assertComparableConformedImages(nativeConformed, pythonConformed);
-    }
+}
 
-    void test_step_conform_oblique_image_parity()
-    {
-        const std::filesystem::path repoRoot = FASTSURFER_REPO_ROOT;
+// Verifies native parity against generated Python artifacts for the oblique NIfTI fixture.
+void test_step_conform_oblique_image_parity()
+{
+        const std::filesystem::path repoRoot = OPENHC_REPO_ROOT;
         const std::filesystem::path fixturePath = repoRoot / "data/parrec_oblique/NIFTI/3D_T1W_trans_35_25_15_SENSE_26_1.nii";
         const std::filesystem::path artifactRoot =
             repoRoot / "generated/FastSurferCNN/parrec_oblique_3d_t1w_trans_35_25_15_sense_26_1_cpp_parity" /
@@ -360,10 +403,13 @@ void assertComparableConformedImages(
         assertExactImageMatch(nativeCopy, pythonCopy);
 
         assertComparableConformedImages(nativeConformed, pythonConformed);
-    }
+}
 
-    void runNamedCase(const std::string &caseName)
-    {
+// Dispatches one named parity test case.
+// Parameters:
+// - caseName: CLI token identifying the parity case to run.
+void runNamedCase(const std::string &caseName)
+{
         if (caseName == "conformed") {
             test_step_conform_standardized_image_parity();
             return;
@@ -379,7 +425,12 @@ void assertComparableConformedImages(
 
 } // namespace
 
-    int main(int argc, char **argv)
+// Runs one or more parity test scenarios from the command line.
+// Parameters:
+// - argc: Argument count. Optional second argument selects one named case.
+// - argv: Argument vector containing the optional case selector.
+// Returns 0 on success and 1 on failure.
+int main(int argc, char **argv)
 {
     try {
             if (argc > 1) {

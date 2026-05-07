@@ -13,123 +13,140 @@
 #include "imaging/mri/fastsurfer/mgh_image.h"
 #include "imaging/mri/fastsurfer/step_conform_request.h"
 
+namespace ohc = OpenHC::imaging::mri::fastsurfer;
+
 namespace {
 
 // Assertion helpers are provided by TestHelpers.h
 
+// Appends count copies of value to a vector used for histogram-shape fixtures.
+// Parameters:
+// - values: Destination vector to extend.
+// - count: Number of values to append.
+// - value: Repeated value to append.
 void appendRepeatedValues(std::vector<float> &values, const std::size_t count, const float value)
 {
     values.insert(values.end(), count, value);
 }
 
-OpenHC::imaging::mri::fastsurfer::MghImage makeImage(
+// Builds a synthetic image with the requested dimensions and spacing.
+// Parameters:
+// - dimensions: Header dimensions to assign to the synthetic image.
+// - spacing: Per-axis spacing to assign to the synthetic image.
+// Returns an all-zero float image matching the requested geometry.
+ohc::MghImage makeImage(
     const std::array<int, 3> &dimensions,
     const std::array<float, 3> &spacing)
 {
-    OpenHC::imaging::mri::fastsurfer::MghImage::Header header;
+    ohc::MghImage::Header header;
     header.dimensions = dimensions;
     header.spacing = spacing;
 
     const std::size_t voxelCount = static_cast<std::size_t>(dimensions[0]) *
                                    static_cast<std::size_t>(dimensions[1]) *
                                    static_cast<std::size_t>(dimensions[2]);
-    return OpenHC::imaging::mri::fastsurfer::MghImage::fromVoxelData(
+    return ohc::MghImage::fromVoxelData(
         header,
         std::vector<float>(voxelCount, 0.0F),
-        static_cast<std::int32_t>(OpenHC::imaging::mri::fastsurfer::MghDataType::Float32));
+        static_cast<std::int32_t>(ohc::MghDataType::Float32));
 }
 
+    // Verifies the voxel-size policy around below-threshold, above-threshold, and boundary cases.
 void compute_target_voxel_size_should_respect_threshold_cases()
 {
-    OpenHC::imaging::mri::fastsurfer::ConformStepRequest request;
+    ohc::ConformStepRequest request;
 
     const auto belowThresholdImage = makeImage({32, 32, 32}, {0.8F, 1.1F, 1.2F});
     requireNear(
-        OpenHC::imaging::mri::fastsurfer::computeTargetVoxelSize(belowThresholdImage, request),
+        ohc::computeTargetVoxelSize(belowThresholdImage, request),
         0.8F,
         test_constants::CONFORM_POLICY_VOXEL_TOLERANCE,
         "Voxel-size policy should keep the minimum voxel size when it is below the threshold.");
 
     const auto aboveThresholdImage = makeImage({32, 32, 32}, {0.96F, 1.1F, 1.2F});
     requireNear(
-        OpenHC::imaging::mri::fastsurfer::computeTargetVoxelSize(aboveThresholdImage, request),
+        ohc::computeTargetVoxelSize(aboveThresholdImage, request),
         1.0F,
         test_constants::CONFORM_POLICY_VOXEL_TOLERANCE,
         "Voxel-size policy should promote the target voxel size to 1mm when it is above the threshold.");
 
     const auto boundaryImage = makeImage({32, 32, 32}, {0.95F, 1.1F, 1.2F});
     requireNear(
-        OpenHC::imaging::mri::fastsurfer::computeTargetVoxelSize(boundaryImage, request),
+        ohc::computeTargetVoxelSize(boundaryImage, request),
         0.95F,
         test_constants::CONFORM_POLICY_VOXEL_TOLERANCE,
         "Voxel-size policy should preserve the exact threshold boundary because the comparison is strict-greater-than.");
 }
 
+// Verifies that auto sizing cubes the output while FOV sizing keeps per-axis dimensions.
 void compute_native_target_dimensions_should_distinguish_auto_from_fov()
 {
     const auto image = makeImage({300, 240, 180}, {0.8F, 0.8F, 1.0F});
 
-    const auto autoDimensions = OpenHC::imaging::mri::fastsurfer::computeNativeTargetDimensions(image, 0.8F, OpenHC::imaging::mri::fastsurfer::ImageSizeMode::Auto);
+    const auto autoDimensions = ohc::computeNativeTargetDimensions(image, 0.8F, ohc::ImageSizeMode::Auto);
     require(
         autoDimensions == std::array<int, 3> {300, 300, 300},
         "Auto image-size mode should cube the target to the largest derived dimension.");
 
-    const auto fovDimensions = OpenHC::imaging::mri::fastsurfer::computeNativeTargetDimensions(image, 0.8F, OpenHC::imaging::mri::fastsurfer::ImageSizeMode::Fov);
+    const auto fovDimensions = ohc::computeNativeTargetDimensions(image, 0.8F, ohc::ImageSizeMode::Fov);
     require(
         fovDimensions == std::array<int, 3> {300, 240, 225},
         "FOV image-size mode should preserve per-axis target dimensions.");
 }
 
+// Verifies that anisotropic source dimensions expand to a cube in auto mode.
 void compute_native_target_dimensions_should_cube_anisotropic_auto_size()
 {
     const auto image = makeImage({320, 320, 180}, {0.8F, 0.8F, 1.0F});
 
-    const auto autoDimensions = OpenHC::imaging::mri::fastsurfer::computeNativeTargetDimensions(image, 0.8F, OpenHC::imaging::mri::fastsurfer::ImageSizeMode::Auto);
+    const auto autoDimensions = ohc::computeNativeTargetDimensions(image, 0.8F, ohc::ImageSizeMode::Auto);
     require(
         autoDimensions == std::array<int, 3> {320, 320, 320},
         "Auto image-size mode should expand anisotropic FOV-derived dimensions into a cube using the maximum axis.");
 }
 
+// Verifies that small auto-sized outputs still floor to the canonical 256^3 cube.
 void compute_native_target_dimensions_should_floor_small_auto_size_to_256_cube()
 {
     const auto image = makeImage({120, 110, 90}, {0.8F, 0.8F, 0.8F});
 
-    const auto autoDimensions = OpenHC::imaging::mri::fastsurfer::computeNativeTargetDimensions(image, 0.8F, OpenHC::imaging::mri::fastsurfer::ImageSizeMode::Auto);
+    const auto autoDimensions = ohc::computeNativeTargetDimensions(image, 0.8F, ohc::ImageSizeMode::Auto);
     require(
         autoDimensions == std::array<int, 3> {256, 256, 256},
         "Auto image-size mode should retain the minimum 256^3 cube for small fields of view.");
 }
 
+// Verifies string parsing and formatting for the supported conform policy enums.
 void parse_conform_modes_should_round_trip_supported_values_and_reject_invalid_input()
 {
     require(
-        OpenHC::imaging::mri::fastsurfer::parseVoxelSizeMode("min") == OpenHC::imaging::mri::fastsurfer::VoxelSizeMode::Min,
+        ohc::parseVoxelSizeMode("min") == ohc::VoxelSizeMode::Min,
         "Voxel-size mode parser should accept the supported 'min' value.");
     require(
-        OpenHC::imaging::mri::fastsurfer::parseImageSizeMode("auto") == OpenHC::imaging::mri::fastsurfer::ImageSizeMode::Auto,
+        ohc::parseImageSizeMode("auto") == ohc::ImageSizeMode::Auto,
         "Image-size mode parser should accept the supported 'auto' value.");
     require(
-        OpenHC::imaging::mri::fastsurfer::parseImageSizeMode("fov") == OpenHC::imaging::mri::fastsurfer::ImageSizeMode::Fov,
+        ohc::parseImageSizeMode("fov") == ohc::ImageSizeMode::Fov,
         "Image-size mode parser should accept the supported 'fov' value.");
     require(
-        OpenHC::imaging::mri::fastsurfer::to_string(OpenHC::imaging::mri::fastsurfer::VoxelSizeMode::Min) == "min",
+        ohc::to_string(ohc::VoxelSizeMode::Min) == "min",
         "Voxel-size mode string conversion should preserve the public text form.");
     require(
-        OpenHC::imaging::mri::fastsurfer::to_string(OpenHC::imaging::mri::fastsurfer::ImageSizeMode::Auto) == "auto" &&
-            OpenHC::imaging::mri::fastsurfer::to_string(OpenHC::imaging::mri::fastsurfer::ImageSizeMode::Fov) == "fov",
+        ohc::to_string(ohc::ImageSizeMode::Auto) == "auto" &&
+            ohc::to_string(ohc::ImageSizeMode::Fov) == "fov",
         "Image-size mode string conversion should preserve the public text forms.");
     require(
-        OpenHC::imaging::mri::fastsurfer::parseOrientationMode("lia") == OpenHC::imaging::mri::fastsurfer::OrientationMode::Lia &&
-            OpenHC::imaging::mri::fastsurfer::parseOrientationMode("native") == OpenHC::imaging::mri::fastsurfer::OrientationMode::Native,
+        ohc::parseOrientationMode("lia") == ohc::OrientationMode::Lia &&
+            ohc::parseOrientationMode("native") == ohc::OrientationMode::Native,
         "Orientation mode parser should accept the supported request values.");
     require(
-        OpenHC::imaging::mri::fastsurfer::to_string(OpenHC::imaging::mri::fastsurfer::OrientationMode::Lia) == "lia" &&
-            OpenHC::imaging::mri::fastsurfer::to_string(OpenHC::imaging::mri::fastsurfer::OrientationMode::Native) == "native",
+        ohc::to_string(ohc::OrientationMode::Lia) == "lia" &&
+            ohc::to_string(ohc::OrientationMode::Native) == "native",
         "Orientation mode string conversion should preserve the public text forms.");
 
     bool invalidVoxelModeRejected = false;
     try {
-        static_cast<void>(OpenHC::imaging::mri::fastsurfer::parseVoxelSizeMode("bogus"));
+        static_cast<void>(ohc::parseVoxelSizeMode("bogus"));
     } catch (const std::invalid_argument &) {
         invalidVoxelModeRejected = true;
     }
@@ -137,7 +154,7 @@ void parse_conform_modes_should_round_trip_supported_values_and_reject_invalid_i
 
     bool invalidImageModeRejected = false;
     try {
-        static_cast<void>(OpenHC::imaging::mri::fastsurfer::parseImageSizeMode("bogus"));
+        static_cast<void>(ohc::parseImageSizeMode("bogus"));
     } catch (const std::invalid_argument &) {
         invalidImageModeRejected = true;
     }
@@ -145,17 +162,18 @@ void parse_conform_modes_should_round_trip_supported_values_and_reject_invalid_i
 
     bool invalidOrientationModeRejected = false;
     try {
-        static_cast<void>(OpenHC::imaging::mri::fastsurfer::parseOrientationMode("bogus"));
+        static_cast<void>(ohc::parseOrientationMode("bogus"));
     } catch (const std::invalid_argument &) {
         invalidOrientationModeRejected = true;
     }
     require(invalidOrientationModeRejected, "Orientation mode parser should reject unsupported input.");
 }
 
+// Verifies constant-input handling, clamping, and vector application for scale policies.
 void compute_scale_policy_should_handle_constant_inputs_and_apply_scale_consistently()
 {
-    const OpenHC::imaging::mri::fastsurfer::ScalePolicy constantPolicy =
-        OpenHC::imaging::mri::fastsurfer::computeScalePolicy(std::vector<float> {42.0F, 42.0F, 42.0F}, 0.0F, 255.0F);
+    const ohc::ScalePolicy constantPolicy =
+        ohc::computeScalePolicy(std::vector<float> {42.0F, 42.0F, 42.0F}, 0.0F, 255.0F);
     requireNear(constantPolicy.srcMin, 42.0F, test_constants::CONFORM_POLICY_VOXEL_TOLERANCE,
         "Scale policy should preserve the constant input minimum.");
     requireNear(constantPolicy.scale, 1.0F, test_constants::CONFORM_POLICY_VOXEL_TOLERANCE,
@@ -163,53 +181,55 @@ void compute_scale_policy_should_handle_constant_inputs_and_apply_scale_consiste
 
     const OpenHC::imaging::mri::fastsurfer::ScalePolicy policy {10.0F, 2.0F};
     requireNear(
-        OpenHC::imaging::mri::fastsurfer::applyScalePolicyValue(0.0F, 0.0F, 255.0F, policy),
+        ohc::applyScalePolicyValue(0.0F, 0.0F, 255.0F, policy),
         0.0F,
         test_constants::CONFORM_POLICY_VOXEL_TOLERANCE,
         "Scale policy should preserve exact zero values.");
     requireNear(
-        OpenHC::imaging::mri::fastsurfer::applyScalePolicyValue(20.0F, 0.0F, 255.0F, policy),
+        ohc::applyScalePolicyValue(20.0F, 0.0F, 255.0F, policy),
         20.0F,
         test_constants::CONFORM_POLICY_VOXEL_TOLERANCE,
         "Scale policy should shift and scale mapped values.");
     requireNear(
-        OpenHC::imaging::mri::fastsurfer::applyScalePolicyValue(200.0F, 0.0F, 255.0F, policy),
+        ohc::applyScalePolicyValue(200.0F, 0.0F, 255.0F, policy),
         255.0F,
         test_constants::CONFORM_POLICY_VOXEL_TOLERANCE,
         "Scale policy should clamp scaled values to the destination range.");
 
     const std::vector<float> mappedData {0.0F, 20.0F, 200.0F};
-    const std::vector<float> scaled = OpenHC::imaging::mri::fastsurfer::applyScalePolicy(mappedData, 0.0F, 255.0F, policy);
+    const std::vector<float> scaled = ohc::applyScalePolicy(mappedData, 0.0F, 255.0F, policy);
     require(scaled == std::vector<float>({0.0F, 20.0F, 255.0F}),
         "Vector scale application should match the per-value scale policy behavior.");
 }
 
+// Verifies that the scaled-zero epsilon keeps near-zero background values at exact zero.
 void apply_scale_policy_should_respect_zero_epsilon_boundary()
 {
-    const OpenHC::imaging::mri::fastsurfer::ScalePolicy policy {0.0F, 1.0e9F};
+    const ohc::ScalePolicy policy {0.0F, 1.0e9F};
 
     requireNear(
-        OpenHC::imaging::mri::fastsurfer::applyScalePolicyValue(test_constants::SCALED_ZERO_EPSILON * 0.5F, 0.0F, 255.0F, policy),
+        ohc::applyScalePolicyValue(test_constants::SCALED_ZERO_EPSILON * 0.5F, 0.0F, 255.0F, policy),
         0.0F,
         test_constants::CONFORM_POLICY_VOXEL_TOLERANCE,
         "Values below the scaled-zero epsilon should be forced to exact zero.");
     requireNear(
-        OpenHC::imaging::mri::fastsurfer::applyScalePolicyValue(test_constants::SCALED_ZERO_EPSILON, 0.0F, 255.0F, policy),
+        ohc::applyScalePolicyValue(test_constants::SCALED_ZERO_EPSILON, 0.0F, 255.0F, policy),
         0.0F,
         test_constants::CONFORM_POLICY_VOXEL_TOLERANCE,
         "Values exactly on the scaled-zero epsilon boundary should still be treated as zero.");
     requireNear(
-        OpenHC::imaging::mri::fastsurfer::applyScalePolicyValue(test_constants::SCALED_ZERO_EPSILON * 2.0F, 0.0F, 255.0F, policy),
+        ohc::applyScalePolicyValue(test_constants::SCALED_ZERO_EPSILON * 2.0F, 0.0F, 255.0F, policy),
         20.0F,
         test_constants::CONFORM_POLICY_VOXEL_TOLERANCE,
         "Values above the scaled-zero epsilon should participate in normal scaling.");
 }
 
+// Verifies the histogram fallback path when bin widths collapse numerically.
 void compute_scale_policy_should_fallback_to_unit_scale_when_histogram_width_collapses()
 {
     const std::vector<float> nearlyIdenticalValues {1.0e-20F, 1.5e-20F, 2.0e-20F};
-    const OpenHC::imaging::mri::fastsurfer::ScalePolicy policy =
-        OpenHC::imaging::mri::fastsurfer::computeScalePolicy(nearlyIdenticalValues, 0.0F, 255.0F);
+    const ohc::ScalePolicy policy =
+        ohc::computeScalePolicy(nearlyIdenticalValues, 0.0F, 255.0F);
 
     require(
         policy.srcMin == nearlyIdenticalValues.front(),
@@ -221,6 +241,7 @@ void compute_scale_policy_should_fallback_to_unit_scale_when_histogram_width_col
         "When histogram bins collapse numerically, the scale policy should fall back to unit scaling.");
 }
 
+// Verifies that sparse bright outliers are clipped by the upper-percentile scaling policy.
 void compute_scale_policy_should_clip_upper_percentile_outliers()
 {
     std::vector<float> rampValues;
@@ -251,6 +272,7 @@ void compute_scale_policy_should_clip_upper_percentile_outliers()
         "Upper-percentile clipping should stretch mid-high intensities above the plain min-max baseline.");
 }
 
+// Verifies that MRI-like tissue clusters preserve contrast despite sparse bright artifacts.
 void compute_scale_policy_should_scale_mri_like_distribution_without_artifact_dominance()
 {
     std::vector<float> sourceData;
@@ -295,6 +317,9 @@ void compute_scale_policy_should_scale_mri_like_distribution_without_artifact_do
         "Bright artifacts should clamp to the destination maximum.");
 }
 
+// Dispatches one named unit-test case for the single-binary CTest entry points.
+// Parameters:
+// - caseName: CLI token identifying the test case to run.
 void runNamedCase(const std::string &caseName)
 {
     if (caseName == "threshold") {
@@ -352,6 +377,11 @@ void runNamedCase(const std::string &caseName)
 
 } // namespace
 
+// Runs one named conform-policy test case from the command line.
+// Parameters:
+// - argc: Argument count. Expected to be 2.
+// - argv: Argument vector containing the requested case name.
+// Returns 0 on success and 1 on failure.
 int main(int argc, char **argv)
 {
     try {
