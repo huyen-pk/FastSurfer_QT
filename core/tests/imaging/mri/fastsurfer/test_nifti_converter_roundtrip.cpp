@@ -1,4 +1,3 @@
-#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -7,77 +6,13 @@
 
 #include "TestConstants.h"
 #include "TestHelpers.h"
+#include "TestParitySupport.h"
 #include "imaging/common/nifti_converter.h"
 
 namespace ohc = OpenHC::imaging::mri::fastsurfer;
+namespace oht = OpenHC::tests::fastsurfer::support;
 
 namespace {
-
-// Creates a clean temporary directory for one test program invocation.
-// Parameters:
-// - name: Directory suffix used to isolate this test run.
-// Returns the recreated directory path.
-std::filesystem::path makeFreshDirectory(const std::string &name)
-{
-    if (const char *envTmp = std::getenv("FASTSURFER_TEST_TMPDIR"); envTmp != nullptr && envTmp[0] != '\0') {
-        const auto root = std::filesystem::path(envTmp) / name;
-        std::filesystem::remove_all(root);
-        std::filesystem::create_directories(root);
-        return root;
-    }
-
-    const auto root = std::filesystem::temp_directory_path() / std::string("fastsurfer_tests") / name;
-    std::filesystem::remove_all(root);
-    std::filesystem::create_directories(root);
-    return root;
-}
-
-// assertion helpers are provided by TestHelpers.h
-
-// Escapes a filesystem path for safe single-quoted shell invocation.
-// Parameters:
-// - path: Filesystem path to escape.
-// Returns a shell-safe quoted string.
-std::string shellEscape(const std::filesystem::path &path)
-{
-    std::string value = path.string();
-    std::string escaped;
-    escaped.reserve(value.size() + 2);
-    escaped.push_back('\'');
-    for (const char character : value) {
-        if (character == '\'') {
-            escaped += "'\\''";
-        } else {
-            escaped.push_back(character);
-        }
-    }
-    escaped.push_back('\'');
-    return escaped;
-}
-
-// Resolves the Python interpreter used for the nibabel-based round-trip check.
-// Parameters:
-// - repoRoot: Workspace root used to probe local virtual environments.
-// Returns the chosen Python executable path or command.
-std::filesystem::path resolvePythonExecutable(const std::filesystem::path &repoRoot)
-{
-    if (const char *configured = std::getenv("FASTSURFER_PYTHON_EXECUTABLE"); configured != nullptr && configured[0] != '\0') {
-        return configured;
-    }
-
-    const auto workspaceVenv = repoRoot / ".venv-parity" / "bin" / "python";
-    if (std::filesystem::exists(workspaceVenv)) {
-        return workspaceVenv;
-    }
-
-    const auto repoVenv = repoRoot / ".venv" / "bin" / "python";
-    if (std::filesystem::exists(repoVenv)) {
-        return repoVenv;
-    }
-
-    return "python3";
-}
-
 } // namespace
 
 // Converts one NIfTI fixture to MGZ and verifies the round-trip back to NIfTI.
@@ -86,8 +21,8 @@ int main()
 {
     try {
         const std::filesystem::path repoRoot = OPENHC_REPO_ROOT;
-        const auto pythonExecutable = resolvePythonExecutable(repoRoot);
-        const auto outputDir = makeFreshDirectory("openhc_imaging_mri_fastsurfer_nifti_roundtrip_test");
+        const auto pythonExecutable = oht::resolvePythonExecutable(repoRoot);
+        const auto outputDir = oht::makeFreshDirectory("openhc_imaging_mri_fastsurfer_nifti_roundtrip_test");
 
         const auto inputPath = repoRoot / "data/parrec_oblique/NIFTI/3D_T1W_trans_35_25_15_SENSE_26_1.nii";
         const auto mgzPath = outputDir / "roundtrip_input.mgz";
@@ -127,10 +62,10 @@ int main()
         }
 
         const std::string command =
-            shellEscape(pythonExecutable) + " " + shellEscape(pythonScript) +
-            " " + shellEscape(inputPath) +
-            " " + shellEscape(mgzPath) +
-            " " + shellEscape(roundtripNiftiPath);
+            oht::shellEscape(pythonExecutable) + " " + oht::shellEscape(pythonScript) +
+            " " + oht::shellEscape(inputPath) +
+            " " + oht::shellEscape(mgzPath) +
+            " " + oht::shellEscape(roundtripNiftiPath);
 
         const int exitCode = std::system(command.c_str());
         require(exitCode == 0,

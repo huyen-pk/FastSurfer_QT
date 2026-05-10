@@ -557,7 +557,6 @@ float sampleLinearLikeScipy(
     const std::array<int, 3> &dimensions,
     const itk::ContinuousIndex<double, 3> &continuousIndex)
 {
-    constexpr double boundaryEpsilon = 1.0e-5;
     std::array<int, 3> lower {};
     std::array<int, 3> upper {};
     std::array<double, 3> weightUpper {};
@@ -566,7 +565,8 @@ float sampleLinearLikeScipy(
     for (int axis = 0; axis < 3; ++axis) {
         const double maxIndex = static_cast<double>(dimensions[axis] - 1);
         double clampedIndex = continuousIndex[axis];
-        if (clampedIndex < -boundaryEpsilon || clampedIndex > maxIndex + boundaryEpsilon) {
+        if (clampedIndex < -constants::conform::INTERPOLATION_BOUNDARY_EPSILON ||
+            clampedIndex > maxIndex + constants::conform::INTERPOLATION_BOUNDARY_EPSILON) {
             return 0.0F;
         }
         clampedIndex = std::clamp(clampedIndex, 0.0, maxIndex);

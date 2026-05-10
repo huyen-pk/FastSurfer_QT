@@ -12,19 +12,20 @@ namespace {
 // Rounds to the precision used by FastSurfer's conform heuristics.
 float roundToEpsilonPrecision(const float value)
 {
-    constexpr float scale = 10000.0F;
     // Mirror the Python conform path's practical precision before comparing
     // source voxel sizes against the 1 mm policy threshold.
-    return std::round(value * scale) / scale;
+    return std::round(value * constants::conform::FLOAT_ROUNDING_SCALE) /
+           constants::conform::FLOAT_ROUNDING_SCALE;
 }
 
 // Applies FastSurfer's ceil-after-truncate dimension rule for FOV-derived sizes.
 int conformLikeCeil(const float value)
 {
-    constexpr double scale = 10000.0;
     // Match the Python reference by truncating to 4 decimal places before the
     // final ceil to avoid precision-driven off-by-one dimension changes.
-    return static_cast<int>(std::ceil(std::floor(static_cast<double>(value) * scale) / scale));
+    return static_cast<int>(std::ceil(
+        std::floor(static_cast<double>(value) * constants::conform::DOUBLE_ROUNDING_SCALE) /
+        constants::conform::DOUBLE_ROUNDING_SCALE));
 }
 
 } // namespace
@@ -95,31 +96,31 @@ ScalePolicy computeScalePolicy(const std::vector<float> &data, const float dstMi
         return {dataMin, 1.0F};
     }
 
-    constexpr int bins = 1000;
-    const double binWidth = static_cast<double>(dataMax - dataMin) / static_cast<double>(bins);
+    const double binWidth = static_cast<double>(dataMax - dataMin) /
+                            static_cast<double>(constants::conform::HISTOGRAM_BIN_COUNT);
     if (binWidth <= std::numeric_limits<double>::epsilon()) {
         return {dataMin, 1.0F};
     }
 
-    std::vector<int> histogram(bins, 0);
+    std::vector<int> histogram(constants::conform::HISTOGRAM_BIN_COUNT, 0);
     std::size_t nonZeroVoxels = 0;
     for (const float value : data) {
-        if (std::fabs(value) >= 1.0e-15F) {
+        if (std::fabs(value) >= constants::conform::HISTOGRAM_NON_ZERO_EPSILON) {
             ++nonZeroVoxels;
         }
 
         int index = static_cast<int>(std::floor((static_cast<double>(value) - dataMin) / binWidth));
-        index = std::clamp(index, 0, bins - 1);
+        index = std::clamp(index, 0, constants::conform::HISTOGRAM_BIN_COUNT - 1);
         ++histogram[index];
     }
 
-    std::vector<int> cumulative(bins + 1, 0);
-    for (int index = 0; index < bins; ++index) {
+    std::vector<int> cumulative(constants::conform::HISTOGRAM_BIN_COUNT + 1, 0);
+    for (int index = 0; index < constants::conform::HISTOGRAM_BIN_COUNT; ++index) {
         cumulative[index + 1] = cumulative[index] + histogram[index];
     }
 
-    std::vector<float> binEdges(bins + 1, dataMin);
-    for (int index = 0; index <= bins; ++index) {
+    std::vector<float> binEdges(constants::conform::HISTOGRAM_BIN_COUNT + 1, dataMin);
+    for (int index = 0; index <= constants::conform::HISTOGRAM_BIN_COUNT; ++index) {
         binEdges[index] = static_cast<float>(static_cast<double>(dataMin) + binWidth * index);
     }
 
@@ -132,8 +133,9 @@ ScalePolicy computeScalePolicy(const std::vector<float> &data, const float dstMi
         }
     }
 
-    const int upperCutoff = totalVoxels - static_cast<int>((1.0 - 0.999) * static_cast<double>(nonZeroVoxels));
-    int upperEdgeIndex = bins - 1;
+    const int upperCutoff = totalVoxels - static_cast<int>(
+        (1.0 - constants::conform::HISTOGRAM_UPPER_PERCENTILE) * static_cast<double>(nonZeroVoxels));
+    int upperEdgeIndex = constants::conform::HISTOGRAM_BIN_COUNT - 1;
     bool foundUpper = false;
     // Use the same high-percentile clipping strategy as FastSurfer's conform
     // path so rare bright voxels do not dominate the output scaling.
@@ -145,7 +147,7 @@ ScalePolicy computeScalePolicy(const std::vector<float> &data, const float dstMi
         }
     }
     if (!foundUpper) {
-        upperEdgeIndex = bins - 1;
+        upperEdgeIndex = constants::conform::HISTOGRAM_BIN_COUNT - 1;
     }
 
     const float srcMin = binEdges[lowerEdgeIndex];
@@ -166,7 +168,7 @@ float applyScalePolicyValue(
 {
     // Keep exact background zeros at zero so interpolation does not introduce a
     // faint non-zero halo after histogram scaling.
-    if (std::fabs(source) <= 1.0e-8F) {
+    if (std::fabs(source) <= constants::conform::SCALED_ZERO_EPSILON) {
         return 0.0F;
     }
 

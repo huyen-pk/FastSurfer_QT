@@ -1,6 +1,5 @@
 #include <algorithm>
 #include <cmath>
-#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -10,6 +9,7 @@
 
 #include "TestConstants.h"
 #include "TestHelpers.h"
+#include "TestParitySupport.h"
 #include "imaging/mri/fastsurfer/step_conform_request.h"
 #include "imaging/mri/fastsurfer/step_conform.h"
 #include "imaging/common/mgh_image.h"
@@ -17,79 +17,8 @@
 
 namespace {
 
-// Creates a clean temporary directory for one parity-test invocation.
-// Parameters:
-// - name: Directory suffix used to isolate this test run.
-// Returns the recreated directory path.
-std::filesystem::path makeFreshDirectory(const std::string &name)
-{
-    const auto root = [&]() {
-        if (const char *envTmp = std::getenv("FASTSURFER_TEST_TMPDIR"); envTmp != nullptr && envTmp[0] != '\0') {
-            return std::filesystem::path(envTmp) / name;
-        }
-
-        const std::filesystem::path repoRoot = OPENHC_REPO_ROOT;
-        return repoRoot / ".tmp" / name;
-    }();
-
-    std::error_code ec;
-    std::filesystem::remove_all(root, ec);
-    ec.clear();
-    std::filesystem::create_directories(root, ec);
-    if (ec || !std::filesystem::exists(root)) {
-        throw std::runtime_error("Failed to create temporary test directory: " + root.string());
-    }
-
-    return root;
-}
-
-// use shared TestHelpers.h for assertion helpers
-
-// Escapes a filesystem path for safe single-quoted shell invocation.
-// Parameters:
-// - path: Filesystem path to escape.
-// Returns a shell-safe quoted string.
-std::string shellEscape(const std::filesystem::path &path)
-{
-    std::string value = path.string();
-    std::string escaped;
-    escaped.reserve(value.size() + 2);
-    escaped.push_back('\'');
-    for (const char character : value) {
-        if (character == '\'') {
-            escaped += "'\\''";
-        } else {
-            escaped.push_back(character);
-        }
-    }
-    escaped.push_back('\'');
-    return escaped;
-}
-
-// Resolves the Python interpreter used for the parity reference script.
-// Parameters:
-// - repoRoot: Workspace root used to probe local virtual environments.
-// Returns the chosen Python executable path or command.
-std::filesystem::path resolvePythonExecutable(const std::filesystem::path &repoRoot)
-{
-    if (const char *configured = std::getenv("FASTSURFER_PYTHON_EXECUTABLE"); configured != nullptr && configured[0] != '\0') {
-        return configured;
-    }
-
-    const auto workspaceVenv = repoRoot / ".venv-parity" / "bin" / "python";
-    if (std::filesystem::exists(workspaceVenv)) {
-        return workspaceVenv;
-    }
-
-    const auto repoVenv = repoRoot / ".venv" / "bin" / "python";
-    if (std::filesystem::exists(repoVenv)) {
-        return repoVenv;
-    }
-
-    return "python3";
-}
-
 namespace ohc = OpenHC::imaging::mri::fastsurfer;
+namespace oht = OpenHC::tests::fastsurfer::support;
 
 
 // Builds a deliberately non-conformed synthetic input from the Subject140 fixture.
@@ -255,40 +184,15 @@ void assertComparableConformedImages(
 // Parameters:
 // - value: Raw command-line token to escape.
 // Returns a shell-safe quoted string.
-std::string shellEscapeString(const std::string &value)
-{
-        std::string escaped;
-        escaped.reserve(value.size() + 2);
-        escaped.push_back('\'');
-        for (const char character : value) {
-            if (character == '\'') {
-                escaped += "'\\''";
-            } else {
-                escaped.push_back(character);
-            }
-        }
-        escaped.push_back('\'');
-        return escaped;
-}
-
-// Executes a shell command and returns the exit code.
-// Parameters:
-// - command: Full shell command to execute.
-// Returns the process exit code reported by std::system.
-int runCommand(const std::string &command)
-{
-        return std::system(command.c_str());
-}
-
 // Verifies native parity against the Python reference on a synthetic non-conformed MGZ input.
 void test_step_conform_standardized_image_parity()
 {
         const std::filesystem::path repoRoot = OPENHC_REPO_ROOT;
         const std::filesystem::path fixturePath = repoRoot / "data/Subject140/140_orig.mgz";
-        const auto pythonExecutable = resolvePythonExecutable(repoRoot);
+    const auto pythonExecutable = oht::resolvePythonExecutable(repoRoot);
 
-        const auto nativeDir = makeFreshDirectory("openhc_imaging_mri_fastsurfer_native_subject140");
-        const auto pythonDir = makeFreshDirectory("openhc_imaging_mri_fastsurfer_python_subject140");
+    const auto nativeDir = oht::makeFreshDirectory("openhc_imaging_mri_fastsurfer_native_subject140");
+    const auto pythonDir = oht::makeFreshDirectory("openhc_imaging_mri_fastsurfer_python_subject140");
 
         const auto syntheticInputPath = nativeDir / "synthetic_non_conformed_input.mgz";
         const auto nativeCopy = nativeDir / "copy_orig.mgz";
@@ -342,13 +246,13 @@ void test_step_conform_standardized_image_parity()
         require(!nativeResult.alreadyConformed, "The parity input should exercise native reconforming, not the already-conformed shortcut.");
 
         const std::string command =
-            shellEscape(pythonExecutable) + " " + shellEscape(pythonScript) +
-            " " + shellEscape(repoRoot) +
-            " " + shellEscape(syntheticInputPath) +
-            " " + shellEscape(pythonCopy) +
-            " " + shellEscape(pythonConformed);
+            oht::shellEscape(pythonExecutable) + " " + oht::shellEscape(pythonScript) +
+            " " + oht::shellEscape(repoRoot) +
+            " " + oht::shellEscape(syntheticInputPath) +
+            " " + oht::shellEscape(pythonCopy) +
+            " " + oht::shellEscape(pythonConformed);
 
-        const int exitCode = runCommand(command);
+        const int exitCode = oht::runCommand(command);
         require(exitCode == 0,
                 "The Python reference execution failed during the parity test. Set FASTSURFER_PYTHON_EXECUTABLE or create .venv-parity with numpy and nibabel.");
 
@@ -375,7 +279,7 @@ void test_step_conform_oblique_image_parity()
         require(std::filesystem::exists(pythonConformed),
                 "Missing generated Python oblique conformed artifact. Regenerate with tools/generate_fastsurfercnn_intermediate_outputs.py --no-image-size --stop-after-step 3.");
 
-        const auto nativeDir = makeFreshDirectory("openhc_imaging_mri_fastsurfer_native_oblique_parity");
+        const auto nativeDir = oht::makeFreshDirectory("openhc_imaging_mri_fastsurfer_native_oblique_parity");
         const auto nativeCopy = nativeDir / "copy_orig.mgz";
         const auto nativeConformed = nativeDir / "conformed_orig.mgz";
 
