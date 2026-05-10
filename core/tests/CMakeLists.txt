@@ -123,3 +123,47 @@ target_compile_definitions(test_step_conform_parity
 add_test(NAME run_conform_step_should_match_python_reference_on_conformed_image COMMAND test_step_conform_parity conformed)
 
 add_test(NAME run_conform_step_should_match_python_reference_on_oblique_image COMMAND test_step_conform_parity oblique)
+
+add_executable(test_label_mapping
+    imaging/mri/fastsurfer/test_label_mapping.cpp
+)
+
+target_link_libraries(test_label_mapping
+    PRIVATE
+        openhc_imaging_mri_fastsurfer
+)
+
+target_compile_definitions(test_label_mapping
+    PRIVATE
+        OPENHC_REPO_ROOT="${OPENHC_REPO_ROOT}"
+)
+
+add_test(NAME map_manual_aseg_should_apply_expected_fastsurfer_rules COMMAND test_label_mapping synthetic)
+
+add_test(NAME validate_colin27_manual_dkt31_labels_should_be_supported_by_generated_fastsurfer_output COMMAND test_label_mapping colin27)
+
+add_test(NAME map_brats_labels_should_produce_simple_foreground_bridge COMMAND test_label_mapping brats)
+
+add_executable(test_label_mapping_parity
+    imaging/mri/fastsurfer/test_label_mapping_parity.cpp
+)
+
+target_link_libraries(test_label_mapping_parity
+    PRIVATE
+        openhc_imaging_mri_fastsurfer
+)
+
+target_compile_definitions(test_label_mapping_parity
+    PRIVATE
+        OPENHC_REPO_ROOT="${OPENHC_REPO_ROOT}"
+)
+
+add_test(NAME fill_unknown_cortex_should_match_python_reference_on_colin27_manual_aseg_fixture COMMAND test_label_mapping_parity spatial-colin27)
+
+add_test(NAME split_cortex_stage_should_expose_expected_79_to_96_label_transition_on_generated_colin27_artifacts COMMAND test_label_mapping_parity split-stage-colin27)
+
+add_test(NAME evaluate_colin27_manual_dkt31_should_report_exact_shared_label_coverage COMMAND test_label_mapping_parity coverage-manual-dkt31)
+
+add_test(NAME evaluate_colin27_manual_aseg_should_report_expected_raw_missing_labels_and_zero_post_canonicalization_unsupported_labels COMMAND test_label_mapping_parity coverage-manual-aseg)
+
+add_test(NAME evaluate_colin27_aparc_aseg_should_report_expected_surface_only_unsupported_labels_after_canonicalization COMMAND test_label_mapping_parity coverage-aparc-aseg)
