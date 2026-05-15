@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "TestConstants.h"
+#include "TestFixtureBuilders.h"
 #include "TestHelpers.h"
 #include "TestParitySupport.h"
 #include "imaging/mri/fastsurfer/step_conform_request.h"
@@ -19,58 +20,6 @@ namespace {
 
 namespace ohc = OpenHC::imaging::mri::fastsurfer;
 namespace oht = OpenHC::tests::fastsurfer::support;
-
-
-// Builds a deliberately non-conformed synthetic input from the Subject140 fixture.
-// Parameters:
-// - fixturePath: Source MGZ fixture used to seed voxel values.
-// Returns a cropped float image with non-conforming geometry.
-ohc::MghImage createSyntheticNonConformedInput(const std::filesystem::path &fixturePath)
-{
-    const auto sourceImage = OpenHC::imaging::mri::fastsurfer::MghImage::load(fixturePath);
-    const auto sourceData = sourceImage.voxelDataAsFloat();
-    require(!sourceData.empty(), "The fixture MGZ appears empty or unreadable: " + fixturePath.string());
-
-    OpenHC::imaging::mri::fastsurfer::MghImage::Header header = sourceImage.header();
-    header.dimensions = {64, 72, 80};
-    header.frames = 1;
-    header.type = static_cast<std::int32_t>(OpenHC::imaging::mri::fastsurfer::MghDataType::Float32);
-    header.spacing = {1.1F, 1.2F, 0.9F};
-    header.directionCosines = {
-        1.0F, 0.0F, 0.0F,
-        0.0F, 1.0F, 0.0F,
-        0.0F, 0.0F, 1.0F,
-    };
-    header.center = {14.0F, -9.5F, 22.25F};
-
-    std::vector<float> cropped(static_cast<std::size_t>(header.dimensions[0]) *
-                               static_cast<std::size_t>(header.dimensions[1]) *
-                               static_cast<std::size_t>(header.dimensions[2]));
-
-    const auto sourceDimensions = sourceImage.header().dimensions;
-    const int offsetX = (sourceDimensions[0] - header.dimensions[0]) / 2;
-    const int offsetY = (sourceDimensions[1] - header.dimensions[1]) / 2;
-    const int offsetZ = (sourceDimensions[2] - header.dimensions[2]) / 2;
-
-    for (int z = 0; z < header.dimensions[2]; ++z) {
-        for (int y = 0; y < header.dimensions[1]; ++y) {
-            for (int x = 0; x < header.dimensions[0]; ++x) {
-                const std::size_t sourceIndex =
-                    (static_cast<std::size_t>(z + offsetZ) * static_cast<std::size_t>(sourceDimensions[1]) +
-                     static_cast<std::size_t>(y + offsetY)) *
-                        static_cast<std::size_t>(sourceDimensions[0]) +
-                    static_cast<std::size_t>(x + offsetX);
-                const std::size_t targetIndex =
-                    (static_cast<std::size_t>(z) * static_cast<std::size_t>(header.dimensions[1]) + static_cast<std::size_t>(y)) *
-                        static_cast<std::size_t>(header.dimensions[0]) +
-                    static_cast<std::size_t>(x);
-                cropped[targetIndex] = sourceData[sourceIndex];
-            }
-        }
-    }
-
-    return OpenHC::imaging::mri::fastsurfer::MghImage::fromVoxelData(header, cropped, header.type);
-}
 
 // Verifies that two affines agree within the configured tolerances.
 // Parameters:
@@ -201,7 +150,9 @@ void test_step_conform_standardized_image_parity()
         const auto pythonConformed = pythonDir / "conformed_orig.mgz";
         const auto pythonScript = pythonDir / "run_python_reference.py";
 
-        const auto syntheticInput = createSyntheticNonConformedInput(fixturePath);
+        const auto syntheticInput = oht::createSyntheticNonConformedInput(
+            fixturePath,
+            oht::makeSubject140NonConformedInputSpec());
         syntheticInput.save(syntheticInputPath);
 
         {
